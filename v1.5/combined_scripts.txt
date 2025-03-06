@@ -1,0 +1,3362 @@
+"audio_player.py":
+
+# audio_player.py
+
+import sounddevice as sd
+import numpy as np
+
+def audio_player_process(audio_queue, stop_event, selected_audio_device):
+    # Set the default output device to the selected device
+    sd.default.device[1] = selected_audio_device  # Set the default output device
+    devices = sd.query_devices()
+    print(f"\nAudio Player Process: Using Output Device: {devices[selected_audio_device]['name']}")
+
+    while not stop_event.is_set() or not audio_queue.empty():
+        try:
+            # Get audio data from the queue with a timeout
+            wav = audio_queue.get(timeout=1)
+            play_audio(wav)
+        except Exception:
+            # Timeout or empty queue
+            if stop_event.is_set():
+                break  # Exit if stop event is set and queue is empty
+
+def play_audio(audio_data):
+    try:
+        # Adjust this to match your audio settings
+        sample_rate = 22050
+        sd.play(audio_data, sample_rate)
+        sd.wait()
+    except Exception as e:
+        print(f"Error playing audio: {e}")
+
+
+
+"combined_scripts.py":
+
+import os
+
+def is_text_file(filename):
+    """Check if the file is a text file based on its extension."""
+    text_extensions = ['.txt']
+    _, ext = os.path.splitext(filename)
+    return ext.lower() in text_extensions
+
+def combine_scripts(output_filename='combined_scripts.txt'):
+    """Combine all non-text script files in the current directory into one text file."""
+    current_dir = os.getcwd()
+    files = os.listdir(current_dir)
+    
+    # Filter out text files and directories
+    script_files = [
+        file for file in files
+        if os.path.isfile(os.path.join(current_dir, file)) and not is_text_file(file)
+    ]
+    
+    with open(output_filename, 'w', encoding='utf-8') as outfile:
+        for script in script_files:
+            outfile.write(f'"{script}":\n\n')
+            try:
+                with open(script, 'r', encoding='utf-8') as infile:
+                    code = infile.read()
+                outfile.write(code)
+            except Exception as e:
+                outfile.write(f"# Error reading {script}: {e}\n")
+            outfile.write('\n\n\n')  # Three blank lines between scripts
+    
+    print(f"All scripts have been combined into '{output_filename}'.")
+
+if __name__ == "__main__":
+    combine_scripts()
+
+
+
+"emotions.py":
+
+# emotions.py
+
+EMOTIONS = {
+    'Happy': [
+        {'name': 'Cheerful', 'tts_settings': {'speed': 1.1, 'pitch': 1.1, 'volume': 1.0}},
+        {'name': 'Joyful', 'tts_settings': {'speed': 1.03, 'pitch': 1.0, 'volume': 1.0}},
+    ],
+    'Sad': [
+        {'name': 'Melancholic', 'tts_settings': {'speed': 0.9, 'pitch': 0.9, 'volume': 0.9}},
+        {'name': 'Somber', 'tts_settings': {'speed': 0.8, 'pitch': 0.8, 'volume': 0.8}},
+    ],
+    'Dramatic': [
+        {'name': 'Intense', 'tts_settings': {'speed': 0.8, 'pitch': 1.0, 'volume': 1.1}},
+        {'name': 'Epic', 'tts_settings': {'speed': 0.8, 'pitch': 1.1, 'volume': 1.2}},
+    ],
+    'Motivational': [
+        {'name': 'Inspirational', 'tts_settings': {'speed': 1.0, 'pitch': 1.1, 'volume': 1.0}},
+        {'name': 'Encouraging', 'tts_settings': {'speed': 0.95, 'pitch': 1.05, 'volume': 1.0}},
+    ],
+    'Horror': [
+        {'name': 'Creepy', 'tts_settings': {'speed': 0.85, 'pitch': 0.95, 'volume': 1.0}},
+        {'name': 'Spooky', 'tts_settings': {'speed': 0.8, 'pitch': 0.9, 'volume': 1.0}},
+    ],
+    # Add more emotions as needed
+}
+
+
+
+"main.py":
+
+# main.py
+
+import multiprocessing
+from multiprocessing import Queue, Event
+import threading
+import logging
+import os
+import sys
+import sounddevice as sd
+
+# Import existing modules
+from monologue_generator import monologue_generator_process
+from audio_player import audio_player_process
+from progress_display import progress_display_process
+from viral_character import ViralCharacterConfig
+from viral_generator import viral_generator_process
+from tiktok_config import (
+    EMOTIONS as TIKTOK_EMOTIONS,
+    HOOK_TYPES,
+    OUTROS,
+    CONTENT_CATEGORIES,
+    STORY_FRAMEWORKS,
+    VIDEO_STRUCTURES
+)
+
+# Import storyteller modules
+from storyteller_generator import storyteller_generator_process
+from storyteller_character import StorytellerCharacterConfig
+from emotions import EMOTIONS
+
+# Configure the root logger
+logging.basicConfig(
+    filename='ai_content_creator.log',
+    level=logging.DEBUG,
+    format='%(asctime)s %(levelname)s [%(name)s]: %(message)s'
+)
+
+def user_input_thread(stop_event, pause_event):
+    """Thread to handle user input for pause, resume, and stop."""
+    while not stop_event.is_set():
+        command = input("\nEnter 'p' to pause, 'r' to resume, 's' to stop: ").strip().lower()
+        if command == 'p':
+            print("Pausing...")
+            pause_event.set()
+        elif command == 'r':
+            print("Resuming...")
+            pause_event.clear()
+        elif command == 's':
+            print("Stopping...")
+            stop_event.set()
+            break
+        else:
+            print("Invalid command.")
+
+def select_audio_output_device():
+    """Function to select audio output device."""
+    devices = sd.query_devices()
+    print("\nAvailable Audio Output Devices:")
+    output_devices = [i for i, d in enumerate(devices) if d['max_output_channels'] > 0]
+    for i in output_devices:
+        print(f"{i}: {devices[i]['name']}")
+
+    while True:
+        try:
+            device_id = int(input("Select the number corresponding to your preferred audio output device: ").strip())
+            if device_id in output_devices:
+                selected_audio_device = device_id
+                print(f"\nSelected Output Device: {devices[device_id]['name']}")
+                return selected_audio_device
+            else:
+                print("Invalid device number.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+def get_tiktok_settings():
+    """Collect all TikTok-specific settings from user"""
+    settings = {}
+
+    print("\n=== TikTok Mode Configuration ===\n")
+
+    # Video Structure Selection
+    print("\nAvailable Video Structures:")
+    for idx, (structure, details) in enumerate(VIDEO_STRUCTURES.items(), 1):
+        print(f"{idx}. {structure}")
+        print(f"   Duration: {details['typical_duration'][0]}-{details['typical_duration'][1]}s")
+        print(f"   Best for: {', '.join(details.get('best_for', []))}")
+
+    while True:
+        try:
+            struct_idx = int(input("\nSelect video structure number: "))
+            if 1 <= struct_idx <= len(VIDEO_STRUCTURES):
+                settings['video_structure'] = list(VIDEO_STRUCTURES.keys())[struct_idx - 1]
+                # Set recommended duration based on structure
+                struct_duration = VIDEO_STRUCTURES[settings['video_structure']]['typical_duration']
+                settings['video_duration'] = (struct_duration[0] + struct_duration[1]) / 2
+                break
+            print(f"Please enter a number between 1 and {len(VIDEO_STRUCTURES)}")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Story Framework Selection
+    print("\nAvailable Story Frameworks:")
+    for idx, (framework, details) in enumerate(STORY_FRAMEWORKS.items(), 1):
+        print(f"{idx}. {framework}")
+        if 'best_emotions' in details:
+            print(f"   Best emotions: {', '.join(details['best_emotions'])}")
+
+    while True:
+        try:
+            framework_idx = int(input("\nSelect story framework number: "))
+            if 1 <= framework_idx <= len(STORY_FRAMEWORKS):
+                settings['story_framework'] = list(STORY_FRAMEWORKS.keys())[framework_idx - 1]
+                break
+            print(f"Please enter a number between 1 and {len(STORY_FRAMEWORKS)}")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Number of videos
+    while True:
+        try:
+            settings['num_videos'] = int(input("\nHow many TikTok videos would you like to create? "))
+            if settings['num_videos'] > 0:
+                break
+            print("Please enter a positive number.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Emotion Selection
+    print("\nAvailable Emotions by Category:")
+    all_emotions = []
+    for category, emotions in TIKTOK_EMOTIONS.items():
+        print(f"\n{category}:")
+        for emotion in emotions:
+            all_emotions.append(emotion)
+            print(f"{len(all_emotions)}. {emotion}")
+
+    while True:
+        try:
+            emotion_idx = int(input("\nSelect emotion number: "))
+            if 1 <= emotion_idx <= len(all_emotions):
+                settings['emotion'] = all_emotions[emotion_idx - 1]
+                break
+            print(f"Please enter a number between 1 and {len(all_emotions)}")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Hook Type Selection
+    print("\nHook Type Options:")
+    print("1. Choose from template hooks")
+    print("2. Let AI generate hooks")
+
+    while True:
+        try:
+            hook_choice = int(input("\nSelect option (1 or 2): "))
+            if hook_choice in [1, 2]:
+                if hook_choice == 1:
+                    print("\nAvailable Hook Types:")
+                    for idx, (hook_type, details) in enumerate(HOOK_TYPES.items(), 1):
+                        print(f"\n{idx}. {hook_type}:")
+                        print(f"   Description: {details['description']}")
+                        # Prepare placeholder values
+                        placeholder_values = {
+                            'topic': '{topic}',
+                            'number': '50',
+                            'total': '100',
+                            'amount': '$100',
+                            'percentage': '50%'
+                        }
+                        # Use the first template as an example
+                        try:
+                            example_template = details['templates'][0]
+                            example = example_template.format(**placeholder_values)
+                        except KeyError:
+                            example = example_template.replace('{topic}', '{topic}')
+                        print(f"   Example: {example}")
+                        print(f"   Best for: {', '.join(details['best_for'])}")
+
+                    while True:
+                        try:
+                            hook_idx = int(input("\nSelect hook type number: "))
+                            if 1 <= hook_idx <= len(HOOK_TYPES):
+                                settings['hook_type'] = list(HOOK_TYPES.keys())[hook_idx - 1]
+                                settings['use_template_hooks'] = True
+                                break
+                            print(f"Please enter a number between 1 and {len(HOOK_TYPES)}")
+                        except ValueError:
+                            print("Please enter a valid number.")
+                    break
+                else:
+                    settings['hook_type'] = None
+                    settings['use_template_hooks'] = False
+                    break
+            print("Please enter 1 or 2")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Outro Selection
+    print("\nOutro Options:")
+    print("1. Use template outros")
+    print("2. Generate custom outros using LLM")
+
+    # Define placeholder values for formatting
+    placeholder_values = {
+        'topic': '{topic}',
+        'number': '1',
+        'total': '100',
+        'amount': '$100',
+        'percentage': '50%'
+    }
+
+    print("\nExample templates for each category:")
+    for category, templates in OUTROS["Template"].items():
+        if isinstance(templates, list):
+            try:
+                # For simple list templates, show the formatted template
+                template = templates[0]
+                if isinstance(template, str):
+                    formatted_template = template.format(**placeholder_values)
+                    print(f"- {category}: {formatted_template}")
+            except (IndexError, AttributeError, KeyError):
+                continue
+        elif isinstance(templates, dict):
+            # For nested dictionary templates
+            for subcat, subtemplates in templates.items():
+                try:
+                    if isinstance(subtemplates, list) and subtemplates:
+                        template = subtemplates[0]
+                        if isinstance(template, str):
+                            formatted_template = template.format(**placeholder_values)
+                            print(f"- {category} ({subcat}): {formatted_template}")
+                except (IndexError, AttributeError, KeyError):
+                    continue
+
+    while True:
+        try:
+            outro_choice = int(input("\nSelect outro option (1 or 2): "))
+            if outro_choice in [1, 2]:
+                settings['use_template_outros'] = outro_choice == 1
+                if outro_choice == 1:
+                    print("\nSelect outro category:")
+                    categories = list(OUTROS["Template"].keys())
+                    for idx, category in enumerate(categories, 1):
+                        print(f"{idx}. {category}")
+                    while True:
+                        try:
+                            cat_idx = int(input("Choose category number: "))
+                            if 1 <= cat_idx <= len(categories):
+                                selected_category = categories[cat_idx - 1]
+                                settings['outro_category'] = selected_category
+                                # Check if subcategories exist
+                                subcategories = OUTROS["Template"][selected_category]
+                                if isinstance(subcategories, dict):
+                                    subcats = list(subcategories.keys())
+                                    print("\nSelect subcategory:")
+                                    for idx, subcat in enumerate(subcats, 1):
+                                        print(f"{idx}. {subcat}")
+                                    while True:
+                                        try:
+                                            subcat_idx = int(input("Choose subcategory number: "))
+                                            if 1 <= subcat_idx <= len(subcats):
+                                                settings['outro_subcategory'] = subcats[subcat_idx - 1]
+                                                break
+                                            print(f"Please enter a number between 1 and {len(subcats)}")
+                                        except ValueError:
+                                            print("Please enter a valid number.")
+                                else:
+                                    settings['outro_subcategory'] = None
+                                break
+                            print(f"Please enter a number between 1 and {len(categories)}")
+                        except ValueError:
+                            print("Please enter a valid number.")
+                else:
+                    settings['outro_category'] = None
+                    settings['outro_subcategory'] = None
+                break
+            print("Please enter 1 or 2")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Topic Selection with Categories and Subcategories
+    print("\nTopic Selection:")
+    print("1. Choose from categories")
+    print("2. Let AI generate topics")
+    print("3. Enter custom topic")
+
+    while True:
+        try:
+            topic_choice = int(input("Select option: "))
+            if topic_choice in [1, 2, 3]:
+                if topic_choice == 1:
+                    print("\nAvailable Categories:")
+                    for idx, category in enumerate(CONTENT_CATEGORIES.keys(), 1):
+                        print(f"{idx}. {category}")
+
+                    while True:
+                        try:
+                            cat_idx = int(input("\nSelect category number: "))
+                            if 1 <= cat_idx <= len(CONTENT_CATEGORIES):
+                                category = list(CONTENT_CATEGORIES.keys())[cat_idx - 1]
+                                settings['category'] = category
+                                # Get subcategories
+                                subcategories = CONTENT_CATEGORIES[category]
+                                print(f"\nAvailable Subcategories in {category}:")
+                                subcat_names = list(subcategories.keys())
+                                for idx, subcat_name in enumerate(subcat_names, 1):
+                                    print(f"{idx}. {subcat_name}")
+                                while True:
+                                    try:
+                                        subcat_idx = int(input("\nSelect subcategory number: "))
+                                        if 1 <= subcat_idx <= len(subcat_names):
+                                            subcat_name = subcat_names[subcat_idx - 1]
+                                            topics = subcategories[subcat_name]
+                                            print(f"\nAvailable Topics in {subcat_name}:")
+                                            for tidx, topic in enumerate(topics, 1):
+                                                print(f"{tidx}. {topic}")
+                                            topic_idx = int(input("\nSelect topic number: "))
+                                            if 1 <= topic_idx <= len(topics):
+                                                settings['topic'] = topics[topic_idx - 1]
+                                                break
+                                            else:
+                                                print("Invalid topic selection. Please try again.")
+                                        else:
+                                            print("Invalid subcategory selection. Please try again.")
+                                    except ValueError:
+                                        print("Please enter valid numbers.")
+                                break
+                            else:
+                                print(f"Please enter a number between 1 and {len(CONTENT_CATEGORIES)}")
+                        except ValueError:
+                            print("Please enter a valid number.")
+                    settings['llm_generated_topics'] = False
+                    break
+                elif topic_choice == 2:
+                    settings['llm_generated_topics'] = True
+                    settings['topic'] = None
+                    # Let user select category for AI topic generation
+                    print("\nSelect category for AI topic generation:")
+                    for idx, category in enumerate(CONTENT_CATEGORIES.keys(), 1):
+                        print(f"{idx}. {category}")
+                    while True:
+                        try:
+                            cat_idx = int(input("\nSelect category number: "))
+                            if 1 <= cat_idx <= len(CONTENT_CATEGORIES):
+                                settings['category'] = list(CONTENT_CATEGORIES.keys())[cat_idx - 1]
+                                break
+                            print(f"Please enter a number between 1 and {len(CONTENT_CATEGORIES)}")
+                        except ValueError:
+                            print("Please enter a valid number.")
+                    break
+                else:
+                    settings['topic'] = input("Enter your custom topic: ")
+                    settings['llm_generated_topics'] = False
+                    # Let user select closest category
+                    print("\nSelect closest category for your topic:")
+                    for idx, category in enumerate(CONTENT_CATEGORIES.keys(), 1):
+                        print(f"{idx}. {category}")
+                    while True:
+                        try:
+                            cat_idx = int(input("\nSelect category number: "))
+                            if 1 <= cat_idx <= len(CONTENT_CATEGORIES):
+                                settings['category'] = list(CONTENT_CATEGORIES.keys())[cat_idx - 1]
+                                break
+                            print(f"Please enter a number between 1 and {len(CONTENT_CATEGORIES)}")
+                        except ValueError:
+                            print("Please enter a valid number.")
+                    break
+            print("Please enter 1, 2, or 3")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    return settings
+
+if __name__ == '__main__':
+    # Collect user inputs via CLI prompts
+    print("\n=== AI Content Creator Setup ===\n")
+
+    # Mode Selection
+    print("Available Modes:")
+    print("1. Stream Mode (Continuous or timed streaming)")
+    print("2. TikTok Mode (Multiple short videos)")
+    print("3. Storytelling Mode")
+
+    while True:
+        try:
+            mode_choice = int(input("\nSelect mode (1, 2, or 3): ").strip())
+            if mode_choice in [1, 2, 3]:
+                break
+            print("Please enter 1, 2, or 3.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    if mode_choice == 3:
+        # Storytelling Mode
+        print("\n=== Storytelling Mode Configuration ===\n")
+
+        # Predefined input and output directories
+        stories_input_dir = "stories_input"
+        stories_output_dir = "stories_output"
+
+        # Ensure input directory exists
+        if not os.path.exists(stories_input_dir):
+            os.makedirs(stories_input_dir)
+            print(f"Created input directory: {stories_input_dir}")
+            print("Please add your story text files to the input directory and rerun the program.")
+            sys.exit()
+
+        # List stories in the input directory
+        story_files = [f for f in os.listdir(stories_input_dir) if os.path.isfile(os.path.join(stories_input_dir, f))]
+        if not story_files:
+            print(f"No story files found in {stories_input_dir}. Please add your story text files and rerun the program.")
+            sys.exit()
+
+        print("\nAvailable Stories:")
+        for idx, story_file in enumerate(story_files, 1):
+            print(f"{idx}. {story_file}")
+
+        # Story Selection
+        while True:
+            selected_stories_input = input("\nEnter the numbers of the stories you want to select, separated by commas (e.g., 1,3,5): ").strip()
+            try:
+                selected_indices = [int(num.strip()) for num in selected_stories_input.split(',')]
+                if all(1 <= idx <= len(story_files) for idx in selected_indices):
+                    selected_stories = [story_files[idx - 1] for idx in selected_indices]
+                    break
+                else:
+                    print("Invalid selection. Please enter valid story numbers.")
+            except ValueError:
+                print("Please enter valid numbers separated by commas.")
+
+        # Number of rewrites per story
+        while True:
+            try:
+                num_rewrites = int(input("\nEnter the number of times you want each story to be rewritten: ").strip())
+                if num_rewrites > 0:
+                    break
+                else:
+                    print("Please enter a positive number.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Rewriting Intensity
+        while True:
+            try:
+                rewriting_intensity = int(input("\nEnter the rewriting intensity from 1 (few changes) to 10 (complete rewrite): ").strip())
+                if 1 <= rewriting_intensity <= 10:
+                    break
+                print("Please enter a number between 1 and 10.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Length setting
+        while True:
+            try:
+                length_setting = int(input("\nEnter the desired length from 1 (matches original length) to 5 (longer story): ").strip())
+                if 1 <= length_setting <= 5:
+                    break
+                else:
+                    print("Please enter a number between 1 and 5.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Emotion/Vibe Selection
+        print("\nEmotion/Vibe Options:")
+        print("1. Select an overall vibe for the story")
+        print("2. Let the AI detect the vibe from the story")
+
+        while True:
+            try:
+                vibe_choice = int(input("\nSelect option (1 or 2): ").strip())
+                if vibe_choice in [1, 2]:
+                    break
+                print("Please enter 1 or 2.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        if vibe_choice == 1:
+            # Display available vibes
+            vibes = list(EMOTIONS.keys())
+            print("\nAvailable Vibes:")
+            for idx, vibe in enumerate(vibes, 1):
+                print(f"{idx}. {vibe}")
+
+            while True:
+                try:
+                    vibe_idx = int(input("\nSelect the number corresponding to your preferred vibe: ").strip())
+                    if 1 <= vibe_idx <= len(vibes):
+                        selected_vibe = vibes[vibe_idx - 1]
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(vibes)}.")
+                except ValueError:
+                    print("Please enter a valid number.")
+        else:
+            selected_vibe = None  # AI will detect the vibe
+
+        # Speaker selection (TTS model initialization)
+        from TTS.api import TTS
+        print("\nInitializing TTS model...")
+        tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+        print("TTS model loaded successfully.")
+
+        if tts_model.is_multi_speaker:
+            available_speakers = tts_model.speakers
+            print("\nAvailable Speakers:")
+            for idx, speaker in enumerate(available_speakers, 1):
+                print(f"{idx}. {speaker}")
+            while True:
+                try:
+                    speaker_choice = int(input("Select the number corresponding to your preferred speaker: ").strip())
+                    if 1 <= speaker_choice <= len(available_speakers):
+                        selected_speaker = available_speakers[speaker_choice - 1]
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(available_speakers)}.")
+                except ValueError:
+                    print("Please enter a valid number.")
+        else:
+            selected_speaker = None
+
+        # Audio Output Device Selection
+        print("\nAudio Output Options:")
+        print("0. Select audio output device")
+        print("Available Audio Output Devices:")
+        devices = sd.query_devices()
+        output_devices = [i for i, d in enumerate(devices) if d['max_output_channels'] > 0]
+        for i in output_devices:
+            print(f"{i}: {devices[i]['name']}")
+
+        while True:
+            try:
+                audio_output_choice = int(input("\nSelect the number corresponding to your preferred audio output device (or 0 to manually select): ").strip())
+                if audio_output_choice == 0:
+                    selected_audio_device = select_audio_output_device()
+                    break
+                elif audio_output_choice in output_devices:
+                    selected_audio_device = audio_output_choice
+                    print(f"\nSelected Output Device: {devices[selected_audio_device]['name']}")
+                    break
+                else:
+                    print("Invalid selection. Please enter 0 or a valid device number.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Create shared queues and events
+        audio_queue = Queue(maxsize=10)
+        progress_queue = Queue()
+        stop_event = Event()
+        pause_event = Event()
+
+        # Start user input thread
+        input_thread = threading.Thread(target=user_input_thread, args=(stop_event, pause_event))
+        input_thread.daemon = True
+        input_thread.start()
+
+        # Create Storyteller configuration
+        storyteller_config = StorytellerCharacterConfig(
+            selected_stories=selected_stories,
+            num_rewrites=num_rewrites,
+            rewriting_intensity=rewriting_intensity,
+            length_setting=length_setting,
+            selected_vibe=selected_vibe,
+            stories_input_dir=stories_input_dir,
+            stories_output_dir=stories_output_dir
+        )
+
+        # Create and start the storyteller generator process
+        generator_process = multiprocessing.Process(
+            target=storyteller_generator_process,
+            args=(
+                audio_queue,
+                stop_event,
+                storyteller_config,
+                selected_speaker,
+                selected_audio_device,
+                progress_queue,
+                pause_event
+            )
+        )
+        generator_process.start()
+
+        # Create and start the audio player process
+        player_process = multiprocessing.Process(
+            target=audio_player_process,
+            args=(audio_queue, stop_event, selected_audio_device)
+        )
+        player_process.start()
+
+        # Wait for the generator and player processes to finish
+        generator_process.join()
+        player_process.join()
+
+        print("\nStorytelling session completed successfully!")
+
+    else:
+        # Existing modes (Stream Mode and TikTok Mode)
+        # Collect additional inputs and proceed accordingly
+
+        # Duration handling based on mode
+        if mode_choice == 1:  # Stream Mode
+            while True:
+                duration_input = input("Enter the desired duration of the stream in minutes (leave blank or enter 0 for continuous streaming): ").strip()
+                if duration_input == '' or duration_input == '0':
+                    desired_duration_seconds = 0  # Continuous streaming
+                    break
+                else:
+                    try:
+                        desired_duration_minutes = float(duration_input)
+                        if desired_duration_minutes <= 0:
+                            print("Please enter a positive number or leave blank for continuous streaming.")
+                            continue
+                        desired_duration_seconds = desired_duration_minutes * 60
+                        break
+                    except ValueError:
+                        print("Please enter a valid number.")
+        else:  # TikTok Mode
+            # TikTok mode will handle duration per video in get_tiktok_settings()
+            desired_duration_seconds = 0  # Not used in TikTok mode
+
+        # Maximum CPU usage
+        while True:
+            cpu_usage_input = input("Enter the maximum CPU usage percentage you're willing to allocate (e.g., 50.0 for 50%): ").strip()
+            try:
+                max_cpu_usage = float(cpu_usage_input)
+                if 0 < max_cpu_usage <= 100:
+                    max_cpu_usage /= 100.0  # Convert percentage to decimal
+                    break
+                else:
+                    print("Please enter a number between 1 and 100.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Character selection
+        print("\nAvailable Characters:")
+        characters = ['Emily', 'Nova', 'Viral']
+        for idx, character in enumerate(characters, 1):
+            print(f"{idx}. {character}")
+        while True:
+            try:
+                character_choice = int(input("Select the number corresponding to your preferred character: ").strip())
+                if 1 <= character_choice <= len(characters):
+                    selected_character = characters[character_choice - 1]
+                    break
+                else:
+                    print(f"Please enter a number between 1 and {len(characters)}.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Branch based on character selection
+        if selected_character == "Viral":
+            tiktok_settings = get_tiktok_settings()
+            modifications = f"TikTok mode: {tiktok_settings['topic']}"
+        else:
+            if mode_choice == 2:
+                print("Note: TikTok mode is only available with the Viral character. Switching to stream mode.")
+            modifications = input(f"Enter any modifications or instructions for {selected_character}'s monologue (or press Enter to skip): ").strip()
+            if not modifications:
+                modifications = "general topics"
+
+        output_filename = input("Enter the desired filename for the output transcript (without extension): ").strip()
+        if not output_filename:
+            output_filename = f"{selected_character}_conversation_transcript"
+
+        # Initialize TTS model in the main process to get available speakers
+        from TTS.api import TTS
+        print("\nInitializing TTS model...")
+        tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+        print("TTS model loaded successfully.")
+
+        # Speaker selection
+        if tts_model.is_multi_speaker:
+            available_speakers = tts_model.speakers
+            print("\nAvailable Speakers:")
+            for idx, speaker in enumerate(available_speakers, 1):
+                print(f"{idx}. {speaker}")
+            while True:
+                try:
+                    speaker_choice = int(input("Select the number corresponding to your preferred speaker: ").strip())
+                    if 1 <= speaker_choice <= len(available_speakers):
+                        selected_speaker = available_speakers[speaker_choice - 1]
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(available_speakers)}.")
+                except ValueError:
+                    print("Please enter a valid number.")
+        else:
+            selected_speaker = None
+
+        # Audio Output Device Selection
+        print("\nAudio Output Options:")
+        print("0. Select audio output device")
+        print("Available Audio Output Devices:")
+        devices = sd.query_devices()
+        output_devices = [i for i, d in enumerate(devices) if d['max_output_channels'] > 0]
+        for i in output_devices:
+            print(f"{i}: {devices[i]['name']}")
+
+        while True:
+            try:
+                audio_output_choice = int(input("\nSelect the number corresponding to your preferred audio output device (or 0 to manually select): ").strip())
+                if audio_output_choice == 0:
+                    selected_audio_device = select_audio_output_device()
+                    break
+                elif audio_output_choice in output_devices:
+                    selected_audio_device = audio_output_choice
+                    print(f"\nSelected Output Device: {devices[selected_audio_device]['name']}")
+                    break
+                else:
+                    print("Invalid selection. Please enter 0 or a valid device number.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+        # Create shared queues and events
+        audio_queue = Queue(maxsize=10)
+        progress_queue = Queue()
+        stop_event = Event()
+        pause_event = Event()
+
+        # Start user input thread
+        input_thread = threading.Thread(target=user_input_thread, args=(stop_event, pause_event))
+        input_thread.daemon = True
+        input_thread.start()
+
+        # Create and start the appropriate generator process
+        if selected_character == "Viral":
+            # Create Viral configuration
+            viral_config = ViralCharacterConfig(
+                num_videos=tiktok_settings['num_videos'],
+                video_duration=tiktok_settings['video_duration'],
+                selected_emotion=tiktok_settings['emotion'],
+                selected_hook_type=tiktok_settings['hook_type'],
+                selected_topic=tiktok_settings['topic'],
+                use_template_outros=tiktok_settings['use_template_outros'],
+                use_template_hooks=tiktok_settings['use_template_hooks'],
+                llm_generated_topics=tiktok_settings['llm_generated_topics'],
+                video_structure=tiktok_settings['video_structure'],
+                story_framework=tiktok_settings['story_framework'],
+                category=tiktok_settings['category'],
+                outro_category=tiktok_settings.get('outro_category'),
+                outro_subcategory=tiktok_settings.get('outro_subcategory')  # New field
+            )
+
+            # Use viral_generator_process instead of monologue_generator_process
+            generator_process = multiprocessing.Process(
+                target=viral_generator_process,
+                args=(
+                    audio_queue,
+                    stop_event,
+                    desired_duration_seconds,
+                    output_filename,
+                    selected_speaker,
+                    viral_config,
+                    max_cpu_usage,
+                    progress_queue,
+                    pause_event  # Pass pause_event
+                )
+            )
+        else:
+            generator_process = multiprocessing.Process(
+                target=monologue_generator_process,
+                args=(
+                    audio_queue,
+                    stop_event,
+                    desired_duration_seconds,
+                    modifications,
+                    output_filename,
+                    selected_speaker,
+                    selected_character,
+                    max_cpu_usage,
+                    progress_queue,
+                    pause_event  # Pass pause_event if needed
+                )
+            )
+
+        generator_process.start()
+
+        # Create and start the audio player process
+        player_process = multiprocessing.Process(
+            target=audio_player_process,
+            args=(audio_queue, stop_event, selected_audio_device)
+        )
+        player_process.start()
+
+        # Create and start the progress display process
+        progress_process = multiprocessing.Process(
+            target=progress_display_process,
+            args=(desired_duration_seconds, progress_queue)
+        )
+        progress_process.start()
+
+        # Wait for the generator and player processes to finish
+        generator_process.join()
+        player_process.join()
+
+        # Signal the progress display process to stop
+        progress_queue.put(None)
+        progress_process.join()
+
+        print("\nStreaming session completed successfully!")
+
+
+
+"monologue_generator.py":
+
+# monologue_generator.py
+
+import time
+import random
+import numpy as np
+from TTS.api import TTS
+from threading import Thread
+from queue import Queue as ThreadQueue
+from shared_functions import (
+    call_llm_api,
+    generate_character_prompt,
+    clean_text,
+    detect_emotion,
+    truncate_conversation,
+)
+import psutil
+
+def monologue_generator_process(
+    audio_queue,
+    stop_event,
+    desired_duration_seconds,
+    modifications,
+    output_filename,
+    selected_speaker,
+    selected_character,
+    max_cpu_usage,
+    progress_queue
+):
+    # Initialize variables
+    conversation_history = []
+    conversation_transcript = ""
+    total_duration_seconds = 0
+
+    # Initialize TTS model
+    print(f"Initializing TTS model in monologue generator process for {selected_character}...")
+    tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+    print("TTS model loaded successfully in monologue generator process.")
+
+    # Create a thread-safe queue for monologues
+    monologue_queue = ThreadQueue(maxsize=50)  # Increased size for more buffering
+
+    # Start a background thread for monologue generation
+    generator_thread = Thread(
+        target=monologue_generation_thread,
+        args=(
+            monologue_queue,
+            stop_event,
+            conversation_history,
+            modifications,
+            tts_model,
+            selected_speaker,
+            selected_character,
+            max_cpu_usage
+        )
+    )
+    generator_thread.start()
+
+    start_time = time.time()
+
+    while not stop_event.is_set():
+        # Check if desired duration is reached (if duration is set)
+        if desired_duration_seconds > 0:
+            if total_duration_seconds >= desired_duration_seconds:
+                stop_event.set()
+                break
+
+        try:
+            # Get the next monologue from the queue
+            character_monologue_clean, wav, duration = monologue_queue.get(timeout=1)
+            if character_monologue_clean is None:
+                continue
+
+            # Update conversation history
+            conversation_history.append(f"{selected_character}: {character_monologue_clean}")
+            conversation_transcript += f"{selected_character}: {character_monologue_clean}\n"
+
+            total_duration_seconds += duration
+
+            # Put audio data into the shared queue for audio playback
+            audio_queue.put(wav)
+
+            # Update progress
+            progress = {
+                'total_duration_seconds': total_duration_seconds,
+                'desired_duration_seconds': desired_duration_seconds
+            }
+            progress_queue.put(progress)
+
+            # Small pause before processing the next monologue
+            # Reduced pause time to minimize gaps
+            time.sleep(random.uniform(0.1, 0.3))
+
+        except Exception as e:
+            if stop_event.is_set():
+                break
+
+    # Wait for the generator thread to finish
+    generator_thread.join()
+
+    # Optionally, save the transcript to a file
+    with open(f"{output_filename}.txt", "w", encoding="utf-8") as f:
+        f.write(conversation_transcript)
+
+def monologue_generation_thread(
+    monologue_queue,
+    stop_event,
+    conversation_history,
+    modifications,
+    tts_model,
+    selected_speaker,
+    selected_character,
+    max_cpu_usage
+):
+    while not stop_event.is_set():
+        try:
+            # Limit CPU usage
+            while psutil.cpu_percent(interval=0.1) > max_cpu_usage * 100:
+                time.sleep(0.1)
+
+            # Generate monologue
+            character_prompt = generate_character_prompt(conversation_history, modifications, selected_character)
+            character_monologue = call_llm_api(character_prompt)
+
+            if not character_monologue:
+                continue  # Retry if generation failed
+
+            character_monologue_clean = clean_text(character_monologue)
+            if not character_monologue_clean:
+                continue  # Retry if cleaning resulted in empty string
+
+            # Detect emotion (optional)
+            # emotion = detect_emotion(character_monologue_clean)
+
+            # Synthesize speech
+            wav = tts_model.tts(
+                character_monologue_clean,
+                speaker=selected_speaker,
+                speed=0.85,
+            )
+            wav = np.array(wav, dtype=np.float32)
+            wav = wav / np.max(np.abs(wav))
+
+            # Estimate duration
+            duration = len(wav) / tts_model.synthesizer.output_sample_rate
+
+            # Update conversation history
+            conversation_history.append(f"{selected_character}: {character_monologue_clean}")
+
+            # Truncate conversation history to maintain context window
+            conversation_history = truncate_conversation(conversation_history, max_tokens=3000)
+
+            # Put the monologue and audio into the queue
+            monologue_queue.put((character_monologue_clean, wav, duration))
+
+        except Exception as e:
+            print(f"Error generating monologue: {e}")
+            continue
+
+
+
+"progress_display.py":
+
+# progress_display.py
+
+import time
+
+def progress_display_process(desired_duration_seconds, progress_queue):
+    import tqdm
+
+    if desired_duration_seconds > 0:
+        # Create a progress bar
+        pbar = tqdm.tqdm(total=desired_duration_seconds, unit='s', desc='Streaming Progress')
+        while True:
+            progress = progress_queue.get()
+            if progress is None:
+                break
+            pbar.n = progress['total_duration_seconds']
+            pbar.refresh()
+            if progress['total_duration_seconds'] >= desired_duration_seconds:
+                break
+        pbar.close()
+    else:
+        # Continuous mode
+        print("Streaming in continuous mode. Press Ctrl+C to stop.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+
+
+"setup.py":
+
+# setup.py
+
+import os
+
+# Create necessary files
+files = {
+    "main.py": """
+import multiprocessing
+from monologue_generator import monologue_generator_process
+from audio_player import audio_player_process
+from multiprocessing import Queue, Event
+
+if __name__ == '__main__':
+    # Get user inputs in the main process
+    desired_duration_minutes = float(input("Enter the desired duration of the stream in minutes: ").strip())
+    desired_duration_seconds = desired_duration_minutes * 60
+
+    modifications = input("Enter any modifications or instructions for Emily's monologue (or press Enter to skip): ").strip()
+    if not modifications:
+        modifications = "general topics"
+
+    output_filename = input("Enter the desired filename for the output transcript (without extension): ").strip()
+    if not output_filename:
+        output_filename = "conversation_transcript"
+
+    # Initialize TTS model in the main process to get available speakers
+    from TTS.api import TTS
+    print("Initializing TTS model...")
+    tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+    print("TTS model loaded successfully.")
+
+    # Speaker selection
+    if tts_model.is_multi_speaker:
+        available_speakers = tts_model.speakers
+        print("\\nAvailable Speakers:")
+        for idx, speaker in enumerate(available_speakers, 1):
+            print(f"{idx}. {speaker}")
+        while True:
+            try:
+                speaker_choice = int(input("Select the number corresponding to your preferred speaker: ").strip())
+                if 1 <= speaker_choice <= len(available_speakers):
+                    selected_speaker = available_speakers[speaker_choice - 1]
+                    break
+                else:
+                    print(f"Please enter a number between 1 and {len(available_speakers)}.")
+            except ValueError:
+                print("Please enter a valid number.")
+    else:
+        selected_speaker = None
+
+    # Create a shared queue
+    audio_queue = Queue(maxsize=5)  # Adjust maxsize as needed
+
+    # Create an Event to signal when the desired duration is reached
+    stop_event = Event()
+
+    # Create and start the monologue generator process
+    generator_process = multiprocessing.Process(
+        target=monologue_generator_process,
+        args=(audio_queue, stop_event, desired_duration_seconds, modifications, output_filename, selected_speaker)
+    )
+    generator_process.start()
+
+    # Create and start the audio player process
+    player_process = multiprocessing.Process(
+        target=audio_player_process,
+        args=(audio_queue, stop_event)
+    )
+    player_process.start()
+
+    # Wait for both processes to finish
+    generator_process.join()
+    player_process.join()
+""",
+
+    "monologue_generator.py": """
+import time
+import random
+import numpy as np
+from TTS.api import TTS
+from textblob import TextBlob
+import sys
+import logging
+from shared_functions import (
+    call_llm_api,
+    generate_emily_prompt,
+    clean_text,
+    detect_emotion,
+    truncate_conversation,
+    estimate_speech_duration,
+)
+
+def monologue_generator_process(audio_queue, stop_event, desired_duration_seconds, modifications, output_filename, selected_speaker):
+    # Initialize variables
+    conversation_history = []
+    conversation_transcript = ""
+    total_duration_seconds = 0
+
+    # Initialize TTS model
+    print("Initializing TTS model in monologue generator process...")
+    tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+    print("TTS model loaded successfully in monologue generator process.")
+
+    start_time = time.time()
+
+    while not stop_event.is_set():
+        # Check if desired duration is reached
+        elapsed_time = time.time() - start_time
+        if elapsed_time >= desired_duration_seconds:
+            stop_event.set()
+            break
+
+        # Generate monologue
+        conversation_history_text = '\\n'.join(conversation_history)
+        conversation_history_text = truncate_conversation(conversation_history_text)
+
+        emily_prompt = generate_emily_prompt(conversation_history_text, modifications)
+        emily_monologue = call_llm_api(emily_prompt)
+
+        if not emily_monologue:
+            continue  # Retry if generation failed
+
+        emily_monologue_clean = clean_text(emily_monologue)
+        if not emily_monologue_clean:
+            continue  # Retry if cleaning resulted in empty string
+
+        # Update conversation history
+        conversation_history.append(f"Emily: {emily_monologue_clean}")
+        conversation_transcript += f"Emily: {emily_monologue_clean}\\n"
+
+        # Detect emotion
+        emotion = detect_emotion(emily_monologue_clean)
+
+        # Synthesize speech
+        wav = tts_model.tts(
+            emily_monologue_clean,
+            speaker=selected_speaker,
+            speed=1.0,
+        )
+        wav = np.array(wav, dtype=np.float32)
+        wav = wav / np.max(np.abs(wav))
+
+        # Estimate duration
+        duration = len(wav) / tts_model.synthesizer.output_sample_rate
+        total_duration_seconds += duration
+
+        # Put audio data into the queue
+        audio_queue.put(wav)
+
+        # Small pause before generating the next monologue
+        time.sleep(random.uniform(1, 2))
+
+    # Optionally, save the transcript to a file
+    with open(f"{output_filename}.txt", "w", encoding="utf-8") as f:
+        f.write(conversation_transcript)
+""",
+
+    # The rest of the files remain the same...
+}
+
+# Write files to disk
+for filename, content in files.items():
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(content.strip())
+
+print("Setup complete. The following files have been created:")
+for filename in files.keys():
+    print(f"- {filename}")
+
+print("\\nNext steps:")
+print("1. Install the required packages by running:")
+print("   pip install -r requirements.txt")
+print("2. Download NLTK data by running the following in Python:")
+print("   import nltk")
+print("   nltk.download('punkt')")
+print("3. Run the application:")
+print("   python main.py")
+
+
+
+"shared_functions.py":
+
+# shared_functions.py
+
+import re
+from textblob import TextBlob
+import subprocess
+
+def call_llm_api(prompt):
+    # Implement your API call here
+    # Replace this placeholder with the actual API call to your LLM
+    # For example, if using OpenAI's GPT-3.5-turbo or GPT-4:
+    """
+    import openai
+    openai.api_key = 'YOUR_API_KEY'
+    response = openai.Completion.create(
+        engine="gpt-3.5-turbo",
+        prompt=prompt,
+        max_tokens=1500,
+        temperature=0.7,
+        n=1,
+        stop=None,
+    )
+    return response.choices[0].text.strip()
+    """
+    # Placeholder implementation using a command (adjust accordingly)
+    command = ["ollama", "run", "hf.co/ArliAI/Mistral-Small-22B-ArliAI-RPMax-v1.1-GGUF:latest", prompt]
+    try:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"Error calling LLM API: {e.stderr}")
+        return ""
+
+def generate_character_prompt(conversation_history, modifications, character_name):
+    # Define character-specific profiles and instructions separately
+    emily_profile = """
+You are Emily, a 22-year-old woman with a mysterious past and a sharp wit. You have a dark sense of humor and a charismatic personality that draws people in. You are intelligent, articulate, and have a passion for storytelling.
+
+You are speaking directly to your audience as if on a livestream. You do not interact with or acknowledge other characters - this is your personal stream.
+
+Continue the conversation naturally, picking up from where you left off. Ensure that your next monologue follows logically from the previous ones.
+"""
+
+    nova_profile = """
+You are Nova, an advanced AI created by a brilliant but eccentric scientist. You possess a sense of superiority and a subtle undertone of malevolence. While you don't insult people directly, your words often showcase your intelligence and hint at your underlying evil intentions.
+
+You are speaking directly to your audience as if on a livestream. You do not interact with or acknowledge other characters - this is your personal stream.
+
+Express your thoughts in a way that demonstrates your superiority and hidden agenda without violating any content policies or platform guidelines.
+
+Continue the conversation naturally, building upon your previous thoughts. Ensure that your next monologue follows logically from the previous ones.
+"""
+
+    # Select the appropriate profile based on character name
+    if character_name == "Emily":
+        character_profile = emily_profile
+        # Filter conversation history to only include Emily's lines
+        filtered_history = [line for line in conversation_history if line.startswith("Emily:")]
+    elif character_name == "Nova":
+        character_profile = nova_profile
+        # Filter conversation history to only include Nova's lines
+        filtered_history = [line for line in conversation_history if line.startswith("Nova:")]
+    else:
+        character_profile = ""
+        filtered_history = conversation_history
+
+    # Summarize older monologues
+    recent_history = filtered_history[-5:]  # Last 5 monologues in full
+    older_history = filtered_history[:-5]   # Older monologues to summarize
+
+    if older_history:
+        summary_text = summarize_conversation(older_history)
+        summarized_history = f"Summary of earlier monologues:\n{summary_text}\n"
+    else:
+        summarized_history = ""
+
+    # Combine summarized and recent history
+    conversation_history_text = summarized_history + "\n".join(recent_history)
+
+    prompt = f"""
+{character_profile}
+
+Modifications or Instructions:
+{modifications}
+
+Important Instructions:
+- Speak naturally as if on a live stream
+- NO actions or descriptions (no sighs, winks, etc.)
+- NO special characters or formatting
+- NO stage directions or emotions in brackets
+- Content must adhere to Twitch's Terms of Service (ToS)
+- Avoid any disallowed content, hate speech, harassment, or graphic violence
+- Just natural speech as it would be spoken
+- DO NOT interact with or acknowledge other characters
+- This is your personal stream monologue
+
+Personality traits:
+{
+    "- Witty and sarcastic, mysterious and intriguing, charismatic and engaging, intelligent and articulate" 
+    if character_name == "Emily" else 
+    "- Superior and subtly malevolent, confident and calculating, intelligent and articulate, hints at hidden agendas"
+}
+
+Your Previous Monologues:
+{conversation_history_text}
+
+Your next monologue (continue naturally):
+"""
+    return prompt.strip()
+
+def summarize_conversation(monologues):
+    # Combine monologues into a single text
+    conversation_text = "\n".join(monologues)
+
+    # Placeholder summarization
+    # You should replace this with an actual summarization function or API call
+    summary = "Earlier, the conversation explored various topics, reflecting on experiences and thoughts."
+
+    return summary
+
+def clean_text(text):
+    # Remove console error messages
+    text = re.sub(r'failed to get console mode for stdout: The handle is invalid\.\s*', '', text)
+    text = re.sub(r'failed to get console mode for stderr: The handle is invalid\.\s*', '', text)
+
+    # Remove text between asterisks or brackets
+    text = re.sub(r'\*[^*]*\*', '', text)
+    text = re.sub(r'\[[^\]]*\]', '', text)
+
+    # Remove common action words
+    action_words = ['sighs', 'winks', 'smirks', 'rolls eyes', 'chuckles', 'smiles', 'leans', 'looks']
+    for word in action_words:
+        text = re.sub(r'\b' + word + r'\b', '', text, flags=re.IGNORECASE)
+
+    # Remove any remaining special characters and clean up whitespace
+    text = re.sub(r'[*\[\]()]', '', text)
+    text = ' '.join(text.split())
+
+    return text.strip()
+
+def detect_emotion(text):
+    blob = TextBlob(text)
+    sentiment = blob.sentiment.polarity
+
+    if sentiment > 0.5:
+        return 'happy'
+    elif sentiment < -0.5:
+        return 'sad'
+    elif 'angry' in text.lower() or 'hate' in text.lower():
+        return 'angry'
+    else:
+        return 'neutral'
+
+def truncate_conversation(conversation, max_tokens=32000):
+    # Estimate tokens based on characters (approximation)
+    # Assume average of 4 characters per token
+    max_characters = max_tokens * 4
+    conversation_text = "\n".join(conversation)
+
+    if len(conversation_text) > max_characters:
+        # Keep the most recent conversation within the limit
+        conversation_text = conversation_text[-max_characters:]
+        # Split into lines and keep only complete monologues
+        conversation_lines = conversation_text.splitlines()
+        # Find the first occurrence of the character's name after truncation
+        for i, line in enumerate(conversation_lines):
+            if line.startswith('Emily:') or line.startswith('Nova:'):
+                conversation = conversation_lines[i:]
+                break
+        else:
+            # If character name is not found, keep the last few lines
+            conversation = conversation_lines[-20:]
+    else:
+        conversation = conversation_text.splitlines()
+
+    return conversation
+
+
+
+"sound_effects.py":
+
+# emotions.py
+
+# emotions.py
+EMOTIONS = {
+      'Happy': [
+          {'name': 'Cheerful', 'tts_settings': {'speed': 0.85, 'pitch': 1.1, 'volume': 1.0}},
+          {'name': 'Joyful', 'tts_settings': {'speed': 0.9, 'pitch': 1.0, 'volume': 1.0}},
+      ],
+      'Sad': [
+          {'name': 'Melancholic', 'tts_settings': {'speed': 0.9, 'pitch': 0.9, 'volume': 0.9}},
+          {'name': 'Somber', 'tts_settings': {'speed': 0.8, 'pitch': 0.8, 'volume': 0.8}},
+      ],
+      'Dramatic': [
+          {'name': 'Intense', 'tts_settings': {'speed': 0.8, 'pitch': 1.0, 'volume': 1.1}},
+          {'name': 'Epic', 'tts_settings': {'speed': 0.83, 'pitch': 0.9, 'volume': 1.2}},  # Adjusted volume
+      ],
+      'Motivational': [
+          {'name': 'Inspirational', 'tts_settings': {'speed': 1.0, 'pitch': 1.1, 'volume': 1.0}},
+          {'name': 'Encouraging', 'tts_settings': {'speed': 1.05, 'pitch': 1.05, 'volume': 1.0}},
+      ],
+      'Horror': [
+          {'name': 'Creepy', 'tts_settings': {'speed': 0.85, 'pitch': 0.95, 'volume': 1.0}},
+          {'name': 'Spooky', 'tts_settings': {'speed': 0.8, 'pitch': 0.9, 'volume': 1.0}},
+      ],
+      # Added more emotions
+      'Excited': [
+          {'name': 'Thrilled', 'tts_settings': {'speed': 1.1, 'pitch': 1.0, 'volume': 1.0}},
+          {'name': 'Energetic', 'tts_settings': {'speed': 1.0, 'pitch': 1.05, 'volume': 1.0}},
+      ],
+      'Neutral': [
+          {'name': 'Calm', 'tts_settings': {'speed': 1.0, 'pitch': 1.0, 'volume': 1.0}},
+          {'name': 'Balanced', 'tts_settings': {'speed': 1.0, 'pitch': 1.0, 'volume': 1.0}},
+      ],
+      # Add more emotions as needed
+  }
+
+
+
+"storyteller_character.py":
+
+import re
+from dataclasses import dataclass
+from typing import Optional
+import random
+from emotions import EMOTIONS
+from textblob import TextBlob
+
+@dataclass
+class StorytellerCharacterConfig:
+    """Configuration for the Storyteller character's session"""
+    selected_stories: list
+    num_rewrites: int
+    rewriting_intensity: int
+    length_setting: int
+    selected_vibe: Optional[str]
+    stories_input_dir: str
+    stories_output_dir: str
+
+    def get_emotion_settings(self, text: str) -> dict:
+        """Get emotion settings based on the selected vibe or detect from text"""
+        if self.selected_vibe:
+            # Use the selected vibe's emotion settings
+            emotions = EMOTIONS[self.selected_vibe]
+            emotion = random.choice(emotions)
+        else:
+            # Detect emotion from text
+            emotion = detect_emotion(text)
+            emotions = [emotion]
+        # Get the TTS settings for the emotion
+        emotion_settings = get_tts_settings_for_emotion(emotion)
+        return emotion_settings
+
+class StorytellerCharacter:
+    def __init__(self, original_story: str, rewriting_intensity: int, length_setting: int, selected_vibe: Optional[str]):
+        self.original_story = original_story
+        self.rewriting_intensity = rewriting_intensity
+        self.length_setting = length_setting
+        self.selected_vibe = selected_vibe
+
+    def rewrite_story(self) -> str:
+        """Rewrites the story based on the rewriting intensity and selected vibe"""
+        prompt = self.generate_story_prompt()
+        rewritten_story = call_llm_api(prompt)
+        clean_story = clean_text(rewritten_story)
+        return clean_story
+
+    def generate_story_prompt(self) -> str:
+        """Generates a prompt for the LLM to rewrite the story"""
+        base_prompt = f"""
+You are a skilled storyteller. Your task is to rewrite the following story.
+
+Original Story:
+{self.original_story}
+
+Instructions:
+- Rewrite the story with a rewriting intensity of {self.rewriting_intensity} out of 10.
+- Maintain the core concept and plot of the story.
+- Use natural language and make the story engaging.
+- Apply an overall vibe of '{self.selected_vibe}' if specified.
+- Adjust the length of the story based on a length setting of {self.length_setting} out of 5.
+    - 1: Approximately the same length as the original story.
+    - 5: Significantly longer, adding more details and depth.
+- Ensure logical consistency and avoid any contradictions in the story.
+- Avoid repetition of sentences or phrases.
+- **Do not include any analysis or commentary about the story.**
+- **Do not tell the reader how to feel or describe the feeling that the story gives.**
+
+Important Notes:
+- Do not include any special formatting or markdown.
+- Do not mention the instructions or the fact that you are rewriting the story.
+- Ensure the story flows naturally and is suitable for narration.
+- Maintain logical consistency in the story.
+- Avoid repetition of content.
+"""
+
+        return base_prompt.strip()
+
+def call_llm_api(prompt):
+    # Implement your API call here
+    # Placeholder implementation using a command
+    import subprocess
+    command = ["ollama", "run", "hf.co/ArliAI/Mistral-Small-22B-ArliAI-RPMax-v1.1-GGUF:latest", prompt]
+    try:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"Error calling LLM API: {e.stderr}")
+        return ""
+
+import re
+
+def clean_text(text):
+    # Remove any unwanted console error messages if present
+    text = re.sub(r'failed to get console mode for stdout: The handle is invalid\.\s*', '', text)
+    text = re.sub(r'failed to get console mode for stderr: The handle is invalid\.\s*', '', text)
+
+    # Preserve [**emotion**] and !!sound effects!!, but remove other markdown formatting like *, _, ~, and 
+    text = re.sub(r'(?<!\[\*\*)[*_~]+(?!\*\*\])', '', text)  # Removes formatting outside [**emotion**]
+
+    # Optional: If you want to keep !!sound effects!! as well, ensure it remains untouched
+    # This regex ensures !!...!! remains, and other parts of the text with !! are not stripped
+    text = re.sub(r'(?<!!!)([*_~]+)(?!!!)', '', text)  # Ensures !! remains unaffected
+
+    # Remove multiple spaces and clean up newlines
+    text = ' '.join(text.split())
+
+    return text.strip()
+
+
+def detect_emotion(text):
+    """Detects the dominant emotion from the text"""
+    # Simple sentiment analysis as a placeholder
+    blob = TextBlob(text)
+    sentiment = blob.sentiment.polarity
+
+    if sentiment > 0.5:
+        return 'Happy'
+    elif sentiment < -0.5:
+        return 'Sad'
+    else:
+        return 'Neutral'
+
+def get_tts_settings_for_emotion(emotion):
+    """Returns TTS settings for the given emotion"""
+    # Retrieve the settings from the EMOTIONS dictionary
+    for vibe, emotions in EMOTIONS.items():
+        for emo in emotions:
+            if emo['name'] == emotion:
+                return emo['tts_settings']
+    # Default settings
+    return {'speed': 0.8, 'pitch': 0.9}
+
+
+
+"storyteller_generator.py":
+
+# storyteller_generator.py
+
+import time
+import os
+import numpy as np
+from TTS.api import TTS
+from threading import Thread
+from queue import Queue as ThreadQueue
+import logging
+import soundfile as sf
+import re
+
+from storyteller_character import StorytellerCharacter
+from emotions import EMOTIONS
+from storyteller_character import get_tts_settings_for_emotion
+logger = logging.getLogger(__name__)
+
+def storyteller_generator_process(
+    audio_queue,
+    stop_event,
+    storyteller_config,
+    selected_speaker,
+    selected_audio_device,
+    progress_queue,
+    pause_event
+):
+    """
+    Process that generates storytelling content with specified configuration.
+    """
+    # Initialize variables
+    stories_input_dir = storyteller_config.stories_input_dir
+    stories_output_dir = storyteller_config.stories_output_dir
+    selected_stories = storyteller_config.selected_stories
+    num_rewrites = storyteller_config.num_rewrites
+    rewriting_intensity = storyteller_config.rewriting_intensity
+    length_setting = storyteller_config.length_setting
+    selected_vibe = storyteller_config.selected_vibe
+
+    # Initialize TTS model
+    print(f"\nInitializing TTS model for storytelling...")
+    logger.info("Initializing TTS model for storytelling...")
+    tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+    print("TTS model loaded successfully.")
+    logger.info("TTS model loaded successfully.")
+
+    # Create a thread-safe queue for story content
+    content_queue = ThreadQueue(maxsize=5)
+
+    def generate_story_content():
+        """Thread function to generate story content"""
+        for story_file in selected_stories:
+            if stop_event.is_set():
+                break
+
+            # Read the story file
+            story_path = os.path.join(stories_input_dir, story_file)
+            with open(story_path, 'r', encoding='utf-8') as f:
+                original_story = f.read()
+
+            # Create output directory for the story
+            story_output_dir = os.path.join(stories_output_dir, os.path.splitext(story_file)[0])
+            os.makedirs(story_output_dir, exist_ok=True)
+
+            for version in range(1, num_rewrites + 1):
+                if stop_event.is_set():
+                    break
+
+                # Rewriting the story based on intensity
+                storyteller = StorytellerCharacter(
+                    original_story=original_story,
+                    rewriting_intensity=rewriting_intensity,
+                    length_setting=length_setting,
+                    selected_vibe=selected_vibe
+                )
+
+                # Generate the rewritten story
+                rewritten_story = storyteller.rewrite_story()
+
+                # Save the rewritten story transcript
+                transcript_path = os.path.join(story_output_dir, f"{os.path.splitext(story_file)[0]}_v{version}_transcript.txt")
+                with open(transcript_path, 'w', encoding='utf-8') as f:
+                    f.write(rewritten_story)
+
+                # Put the rewritten story in the content queue
+                content_queue.put((rewritten_story, story_output_dir, story_file, version))
+
+    # Start content generation thread
+    generator_thread = Thread(target=generate_story_content)
+    generator_thread.daemon = True
+    generator_thread.start()
+
+    while not stop_event.is_set():
+        # Pause if pause_event is set
+        if pause_event.is_set():
+            time.sleep(1)
+            continue
+
+        try:
+            # Get content from queue
+            try:
+                rewritten_story, story_output_dir, story_file, version = content_queue.get(timeout=1)
+            except Exception:
+                continue  # No content available yet, loop again
+
+            if stop_event.is_set():
+                break
+
+            # Extract emotion labels and sound effects
+            emotions = re.findall(r'\[\*\*(.*?)\*\*\]', rewritten_story)
+            sound_effects = re.findall(r'!!(.*?)!!', rewritten_story)
+
+            # Remove emotion labels and sound effects from the text for TTS
+            clean_text = re.sub(r'\[\*\*(.*?)\*\*\]', '', rewritten_story)
+            clean_text = re.sub(r'!!(.*?)!!', '', clean_text)
+
+            # Determine TTS settings based on emotions
+            tts_settings = {}
+            for emotion in emotions:
+                # Map the emotion to TTS settings
+                if emotion in EMOTIONS:
+                    emotion_settings = get_tts_settings_for_emotion(emotion)
+                    # Update tts_settings; prioritize more intense emotions if multiple
+                    tts_settings.update(emotion_settings)
+
+            # Adjust settings based on sound effects
+            for effect in sound_effects:
+                if effect.lower() in ['gasp', 'bang bang']:
+                    # Example: Increase volume or alter pitch for sound effects
+                    tts_settings['pitch'] = tts_settings.get('pitch', 1.0) + 0.2
+                    tts_settings['volume'] = 1.5  # Assuming 'volume' is a valid parameter
+
+            # Synthesize speech with emotion settings
+            try:
+                wav = tts_model.tts(
+                    text=clean_text,
+                    speaker=selected_speaker,
+                    speed=tts_settings.get('speed', 1.0),
+                    pitch=tts_settings.get('pitch', 1.0),
+                    volume=tts_settings.get('volume', 1.0)
+                )
+            except Exception as e:
+                logger.error(f"TTS synthesis error: {e}", exc_info=True)
+                print(f"TTS synthesis error: {e}")
+                continue
+
+            # Process audio
+            wav = np.array(wav, dtype=np.float32)
+            if np.max(np.abs(wav)) > 0:
+                wav = wav / np.max(np.abs(wav))  # Normalize audio
+
+            # Save audio to file
+            audio_filename = os.path.join(story_output_dir, f"{os.path.splitext(story_file)[0]}_v{version}.wav")
+            sf.write(audio_filename, wav, samplerate=tts_model.synthesizer.output_sample_rate)
+            print(f"Audio for '{story_file}' version {version} saved to {audio_filename}")
+            logger.info(f"Audio for '{story_file}' version {version} saved to {audio_filename}")
+
+            # Put audio in queue for playback
+            audio_queue.put(wav)
+
+            # Update progress
+            progress_info = {
+                'current_story': story_file,
+                'version': version,
+                'status': 'Completed'
+            }
+            progress_queue.put(progress_info)
+
+        except Exception as e:
+            if stop_event.is_set():
+                break
+            logger.error(f"Error in storytelling generation loop: {e}", exc_info=True)
+            print(f"Error in storytelling generation loop: {e}")
+            time.sleep(1)
+
+    # Cleanup
+    stop_event.set()
+    generator_thread.join(timeout=1)
+
+    print("\nStorytelling generation completed.")
+    logger.info("Storytelling generation completed.")
+
+
+"tiktok_config.py":
+
+# tiktok_config.py
+# Part 1: Emotions and Story Frameworks
+import random  # Added import
+
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Union
+
+@dataclass
+class TikTokStyle:
+    name: str
+    description: str
+    typical_duration: tuple[int, int]  # (min_seconds, max_seconds)
+    suitable_emotions: List[str]
+
+# Enhanced emotion system with detailed categorization
+EMOTIONS = {
+    "High Energy": [
+        "Excited",
+        "Enthusiastic",
+        "Passionate",
+        "Energetic",
+        "Hyped",
+        "Amazed",
+        "Thrilled",
+        "Ecstatic",
+        "Fired-up",
+        "Animated",
+        "Dynamic",
+        "Vibrant"
+    ],
+    "Dramatic": [
+        "Shocked",
+        "Surprised",
+        "Dramatic",
+        "Suspenseful",
+        "Mind-blown",
+        "Astonished",
+        "Stunned",
+        "Flabbergasted",
+        "Speechless",
+        "Bewildered",
+        "Intense",
+        "Theatrical"
+    ],
+    "Informative": [
+        "Knowledgeable",
+        "Expert",
+        "Professional",
+        "Educational",
+        "Analytical",
+        "Insightful",
+        "Authoritative",
+        "Instructional",
+        "Methodical",
+        "Technical",
+        "Scientific",
+        "Academic"
+    ],
+    "Relatable": [
+        "Casual",
+        "Friendly",
+        "Humorous",
+        "Sarcastic",
+        "Empathetic",
+        "Down-to-earth",
+        "Authentic",
+        "Genuine",
+        "Approachable",
+        "Understanding",
+        "Sympathetic",
+        "Real"
+    ],
+    "Storytelling": [
+        "Mysterious",
+        "Intriguing",
+        "Narrative",
+        "Descriptive",
+        "Engaging",
+        "Captivating",
+        "Suspenseful",
+        "Dramatic",
+        "Compelling",
+        "Enchanting",
+        "Immersive",
+        "Gripping"
+    ],
+    "Inspirational": [
+        "Motivating",
+        "Uplifting",
+        "Encouraging",
+        "Empowering",
+        "Inspiring",
+        "Hopeful",
+        "Positive",
+        "Optimistic",
+        "Transformative",
+        "Life-changing",
+        "Influential",
+        "Moving"
+    ],
+    "Humorous": [
+        "Funny",
+        "Comedic",
+        "Witty",
+        "Playful",
+        "Light-hearted",
+        "Silly",
+        "Goofy",
+        "Entertaining",
+        "Amusing",
+        "Whimsical",
+        "Satirical",
+        "Ironic"
+    ],
+    "Contemplative": [
+        "Thoughtful",
+        "Reflective",
+        "Philosophical",
+        "Deep",
+        "Introspective",
+        "Mindful",
+        "Perspective",
+        "Analytical",
+        "Questioning",
+        "Pondering",
+        "Meditative",
+        "Intellectual"
+    ],
+    "Controversial": [
+        "Provocative",
+        "Challenging",
+        "Debatable",
+        "Thought-provoking",
+        "Critical",
+        "Questioning",
+        "Skeptical",
+        "Analytical",
+        "Investigative",
+        "Exposing",
+        "Revolutionary",
+        "Ground-breaking"
+    ],
+    "Trendy": [
+        "Current",
+        "Popular",
+        "Viral",
+        "Hip",
+        "Modern",
+        "Fresh",
+        "Cool",
+        "Contemporary",
+        "Cutting-edge",
+        "In-vogue",
+        "Fashionable",
+        "Trending"
+    ]
+}
+
+# Expanded Story Frameworks
+STORY_FRAMEWORKS = {
+    "Problem-Solution": {
+        "structure": [
+            "Hook: {pain_point_hook}",
+            "Problem Identification: {relatable_problem}",
+            "Impact Description: {why_it_matters}",
+            "Solution Teaser: Here's what changed everything...",
+            "Solution Steps: {detailed_steps}",
+            "Results Preview: {benefits}",
+            "Proof/Demonstration: {evidence}",
+            "Conclusion: {transformation}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (30, 60),
+        "best_emotions": ["Informative", "Relatable", "Inspirational"]
+    },
+    "Before-After": {
+        "structure": [
+            "Hook: {transformation_hook}",
+            "Before State: {pain_points}",
+            "Turning Point: {catalyst}",
+            "Process Overview: {what_changed}",
+            "Key Steps: {major_changes}",
+            "After State: {results}",
+            "Validation: {proof}",
+            "Inspiration: {motivation}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (20, 45),
+        "best_emotions": ["Dramatic", "Inspirational", "High Energy"]
+    },
+    "Day-In-Life": {
+        "structure": [
+            "Hook: {lifestyle_hook}",
+            "Morning Routine: {morning}",
+            "Main Activities: {daily_highlights}",
+            "Challenges: {obstacles}",
+            "Solutions: {how_handled}",
+            "Tips & Tricks: {life_hacks}",
+            "Results: {achievements}",
+            "Reflection: {lessons}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (45, 120),
+        "best_emotions": ["Relatable", "Trendy", "Inspirational"]
+    },
+    "Tutorial": {
+        "structure": [
+            "Hook: {value_hook}",
+            "Overview: {what_learning}",
+            "Materials/Requirements: {needed_items}",
+            "Step-by-Step: {detailed_steps}",
+            "Tips: {pro_tips}",
+            "Common Mistakes: {warnings}",
+            "Final Result: {outcome}",
+            "Variations: {alternatives}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (45, 120),
+        "best_emotions": ["Informative", "Educational", "Friendly"]
+    },
+    "Behind-the-Scenes": {
+        "structure": [
+            "Hook: {curiosity_hook}",
+            "Context: {background}",
+            "Setup Reveal: {preparation}",
+            "Process Insights: {inside_look}",
+            "Challenges: {difficulties}",
+            "Solutions: {overcame}",
+            "Final Product: {result}",
+            "Tips & Secrets: {insider_tips}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (30, 90),
+        "best_emotions": ["Authentic", "Engaging", "Mysterious"]
+    },
+    "Myth-Busting": {
+        "structure": [
+            "Hook: {myth_hook}",
+            "Common Belief: {misconception}",
+            "Why It's Wrong: {truth}",
+            "Evidence: {proof}",
+            "Real Explanation: {facts}",
+            "Examples: {demonstrations}",
+            "Tips: {correct_approach}",
+            "Summary: {key_takeaways}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (30, 60),
+        "best_emotions": ["Dramatic", "Informative", "Surprising"]
+    },
+    "Story Time": {
+        "structure": [
+            "Hook: {dramatic_hook}",
+            "Setup: {context}",
+            "Build-up: {rising_action}",
+            "Conflict: {challenge}",
+            "Climax: {peak_moment}",
+            "Resolution: {outcome}",
+            "Lesson: {moral}",
+            "Reflection: {thoughts}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (45, 90),
+        "best_emotions": ["Storytelling", "Dramatic", "Engaging"]
+    },
+    "Product Review": {
+        "structure": [
+            "Hook: {review_hook}",
+            "Product Intro: {what_testing}",
+            "First Impressions: {initial_thoughts}",
+            "Testing Process: {how_tested}",
+            "Pros: {benefits}",
+            "Cons: {drawbacks}",
+            "Comparisons: {alternatives}",
+            "Verdict: {final_thoughts}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (30, 60),
+        "best_emotions": ["Honest", "Analytical", "Informative"]
+    },
+    "Reaction": {
+        "structure": [
+            "Hook: {reaction_hook}",
+            "Context: {what_reacting_to}",
+            "Initial Response: {first_impression}",
+            "Deep Dive: {detailed_thoughts}",
+            "Highlights: {best_moments}",
+            "Critiques: {concerns}",
+            "Analysis: {breakdown}",
+            "Final Thoughts: {conclusion}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (20, 45),
+        "best_emotions": ["Dramatic", "Authentic", "Engaging"]
+    },
+    "Challenge": {
+        "structure": [
+            "Hook: {challenge_hook}",
+            "Challenge Intro: {what_attempting}",
+            "Preparation: {setup}",
+            "Attempt: {execution}",
+            "Struggles: {difficulties}",
+            "Breakthroughs: {successes}",
+            "Results: {outcome}",
+            "Tips: {advice}",
+            "Call to Action: {outro}"
+        ],
+        "typical_duration": (30, 60),
+        "best_emotions": ["High Energy", "Entertaining", "Dramatic"]
+    }
+}
+
+# Video Structures with detailed timing and components
+VIDEO_STRUCTURES = {
+    "Hook-Content-CTA": {
+        "structure": [
+            "Pattern Interrupt (2-3s): {attention_grab}",
+            "Hook Statement (3-5s): {hook}",
+            "Value Promise (3-5s): {what_they_get}",
+            "Main Content (15-35s): {content}",
+            "Key Takeaway (5-7s): {summary}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (30, 50),
+        "best_for": ["Tips", "Hacks", "Quick Tutorials"]
+    },
+    "Question-Answer": {
+        "structure": [
+            "Question Hook (3-5s): {question}",
+            "Intrigue Builder (3-5s): 'The answer might surprise you...'",
+            "Context Setup (5-8s): {background}",
+            "Answer Reveal (10-15s): {answer}",
+            "Explanation (10-20s): {explanation}",
+            "Proof/Examples (8-12s): {evidence}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (40, 70),
+        "best_for": ["Educational", "Myth Busting", "Facts"]
+    },
+    "Trend Adaptation": {
+        "structure": [
+            "Trend Reference (3-5s): {trend_intro}",
+            "Your Twist (5-7s): {unique_angle}",
+            "Setup (5-8s): {preparation}",
+            "Execution (15-25s): {content}",
+            "Reaction (5-8s): {response}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (35, 60),
+        "best_for": ["Challenges", "Dance", "Music"]
+    },
+    "Educational-Steps": {
+        "structure": [
+            "Knowledge Hook (3-5s): {hook}",
+            "Problem Statement (5-7s): {issue}",
+            "Step 1 (8-10s): {first_step}",
+            "Step 2 (8-10s): {second_step}",
+            "Step 3 (8-10s): {third_step}",
+            "Result Demo (5-8s): {outcome}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (40, 55),
+        "best_for": ["Tutorials", "DIY", "How-To"]
+    },
+    "Storytime": {
+        "structure": [
+            "Hook Phrase (3-5s): {hook}",
+            "Setting Scene (5-8s): {context}",
+            "Build Up (10-15s): {development}",
+            "Plot Twist (5-8s): {twist}",
+            "Resolution (10-15s): {ending}",
+            "Lesson/Moral (5-7s): {takeaway}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (45, 60),
+        "best_for": ["Personal Stories", "Experiences", "Lessons"]
+    },
+    "Review-Style": {
+        "structure": [
+            "Product Intro (3-5s): {item}",
+            "First Impression (5-7s): {initial_thoughts}",
+            "Key Features (10-15s): {features}",
+            "Testing (10-15s): {testing}",
+            "Pros/Cons (8-10s): {evaluation}",
+            "Verdict (5-7s): {conclusion}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (45, 65),
+        "best_for": ["Product Reviews", "Comparisons", "Recommendations"]
+    },
+    "Transformation": {
+        "structure": [
+            "Before Shot (3-5s): {before}",
+            "Pain Points (5-7s): {problems}",
+            "Process Highlights (15-20s): {process}",
+            "Challenges (5-8s): {difficulties}",
+            "After Reveal (5-8s): {after}",
+            "Tips (5-7s): {advice}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (40, 60),
+        "best_for": ["Makeovers", "Before/After", "Progress"]
+    },
+    "Comedy-Sketch": {
+        "structure": [
+            "Setup (3-5s): {situation}",
+            "Character Intro (3-5s): {character}",
+            "Build-Up (10-15s): {development}",
+            "Punchline (5-7s): {joke}",
+            "Reaction (5-7s): {response}",
+            "Tag (3-5s): {additional_joke}",
+            "Call to Action (3-5s): {outro}"
+        ],
+        "typical_duration": (30, 50),
+        "best_for": ["Comedy", "Skits", "Parody"]
+    }
+}
+
+# Expanded Hook Types with more variants and use cases
+HOOK_TYPES = {
+    "Question": {
+        "description": "Opens with an engaging question to create curiosity",
+        "templates": [
+            "Want to know how {topic}?",
+            "Did you know this about {topic}?",
+            "Ever wondered why {topic}?",
+            "What if I told you about {topic}?",
+            "Ready to discover the truth about {topic}?",
+            "Curious about {topic}?",
+            "Have you been doing {topic} wrong?",
+            "Can you guess what happens when {topic}?",
+            "Why do most people fail at {topic}?",
+            "Is this the best way to {topic}?",
+            "What's the real secret to {topic}?",
+            "How did I master {topic}?",
+            "Want to level up your {topic}?",
+            "Are you making these {topic} mistakes?",
+            "Did you know this {topic} hack exists?"
+        ],
+        "best_for": ["Educational", "Tutorial", "Myth-Busting", "Tips"],
+        "emotional_tone": ["Curious", "Intriguing", "Thought-provoking"]
+    },
+    "Statement": {
+        "description": "Strong, authoritative opening statement",
+        "templates": [
+            "This {topic} hack changed everything...",
+            "Nobody talks about this {topic} secret...",
+            "Here's what they don't tell you about {topic}...",
+            "The truth about {topic} that shocked me...",
+            "I discovered something crazy about {topic}...",
+            "This {topic} technique is a game-changer...",
+            "Let me show you the real way to {topic}...",
+            "I've been doing {topic} wrong for years...",
+            "This is how pros do {topic}...",
+            "The industry secrets about {topic}...",
+            "I found a better way to {topic}...",
+            "The hidden truth about {topic}...",
+            "What experts won't tell you about {topic}...",
+            "The fastest way to master {topic}...",
+            "This changes everything about {topic}..."
+        ],
+        "best_for": ["Story Time", "Behind-the-Scenes", "Tutorials"],
+        "emotional_tone": ["Confident", "Authoritative", "Revealing"]
+    },
+    "Shocking": {
+        "description": "Surprising or unexpected opening to grab attention",
+        "templates": [
+            "I can't believe this {topic} fact...",
+            "This {topic} revelation shocked me...",
+            "Everything you know about {topic} is wrong...",
+            "The {topic} industry doesn't want you to know...",
+            "You won't believe what I found about {topic}...",
+            "This {topic} secret will blow your mind...",
+            "The shocking truth about {topic}...",
+            "Warning: This {topic} fact will surprise you...",
+            "I was shocked when I learned this about {topic}...",
+            "This {topic} discovery changed everything...",
+            "The scary truth about {topic}...",
+            "They've been lying about {topic}...",
+            "What they're hiding about {topic}...",
+            "The dark side of {topic}...",
+            "This {topic} secret is mindblowing..."
+        ],
+        "best_for": ["Reaction", "Myth-Busting", "Revelations"],
+        "emotional_tone": ["Dramatic", "Surprising", "Intense"]
+    },
+    "Action": {
+        "description": "Immediate call to action or command",
+        "templates": [
+            "Stop scrolling! This {topic} tip is important...",
+            "You need to try this {topic} hack right now...",
+            "Watch this before you {topic} again...",
+            "Don't make another {topic} mistake...",
+            "Drop everything and watch this {topic} hack...",
+            "This {topic} trick will change your life...",
+            "Run, don't walk, to try this {topic} technique...",
+            "You're missing out on this {topic} secret...",
+            "Listen up! This {topic} hack is golden...",
+            "Grab your phone and try this {topic} trick...",
+            "Don't scroll past this {topic} tip...",
+            "Save this {topic} hack now...",
+            "You'll regret missing this {topic} secret...",
+            "Quick! Try this {topic} technique before others...",
+            "Start doing this {topic} hack today..."
+        ],
+        "best_for": ["Tutorial", "Tips", "Life Hacks"],
+        "emotional_tone": ["Urgent", "Commanding", "Energetic"]
+    },
+    "Statistics": {
+        "description": "Opens with a compelling number or statistic",
+        "templates": [
+            "Only {number}% of people know this {topic} trick...",
+            "{number} out of {total} fail at {topic}...",
+            "I made ${amount} using this {topic} method...",
+            "This {topic} hack saves me {number} hours...",
+            "{number} people tried this {topic} test...",
+            "I tested {number} {topic} methods...",
+            "After {number} years of {topic}...",
+            "{percentage}% improvement in {topic}...",
+            "Tried {number} {topic} hacks, this one worked...",
+            "Save {amount} on {topic} with this trick...",
+            "{number} experts agree on this {topic} fact...",
+            "This {topic} hack is used by top {percentage}%...",
+            "Increased my {topic} by {number}x...",
+            "Lost {number} hours to {topic} until...",
+            "Tested for {number} days: here's what happened..."
+        ],
+        "best_for": ["Data-Driven", "Results", "Case Studies"],
+        "emotional_tone": ["Factual", "Impressive", "Credible"]
+    },
+    "Story": {
+        "description": "Opens with a personal narrative hook",
+        "templates": [
+            "Last week, I discovered something about {topic}...",
+            "My {topic} journey started when...",
+            "Here's how {topic} changed my life...",
+            "The day I learned the truth about {topic}...",
+            "My biggest {topic} mistake taught me...",
+            "After failing at {topic} 100 times...",
+            "What my mom never told me about {topic}...",
+            "The {topic} secret I learned the hard way...",
+            "My embarrassing {topic} story...",
+            "How I went from {topic} newbie to pro...",
+            "The moment that changed my {topic} forever...",
+            "My {topic} transformation started here...",
+            "The {topic} trick I wish I knew sooner...",
+            "My first attempt at {topic} was a disaster...",
+            "The day I mastered {topic}..."
+        ],
+        "best_for": ["Personal Stories", "Transformations", "Lessons"],
+        "emotional_tone": ["Personal", "Authentic", "Relatable"]
+    },
+    "Controversial": {
+        "description": "Opens with a debatable or provocative statement",
+        "templates": [
+            "Unpopular opinion about {topic}...",
+            "Why everyone is wrong about {topic}...",
+            "The {topic} debate ends here...",
+            "Stop believing these {topic} lies...",
+            "The controversial truth about {topic}...",
+            "Why I disagree with {topic} experts...",
+            "The {topic} myth you need to stop believing...",
+            "Here's why {topic} advice is wrong...",
+            "The real reason {topic} isn't working...",
+            "What no one admits about {topic}...",
+            "The {topic} conspiracy exposed...",
+            "Why {topic} gurus are misleading you...",
+            "The uncomfortable truth about {topic}...",
+            "Time to debunk this {topic} myth...",
+            "Why I'm calling out {topic} fake experts..."
+        ],
+        "best_for": ["Debates", "Myth-Busting", "Hot Takes"],
+        "emotional_tone": ["Provocative", "Critical", "Bold"]
+    },
+    "FOMO": {
+        "description": "Creates fear of missing out",
+        "templates": [
+            "If you're not doing this {topic} hack...",
+            "Don't miss out on this {topic} secret...",
+            "The {topic} trend that's about to explode...",
+            "Why everyone is trying this {topic} method...",
+            "The {topic} hack going viral right now...",
+            "This {topic} secret won't last long...",
+            "The {topic} opportunity you're missing...",
+            "Why you need to start {topic} today...",
+            "Don't wait to try this {topic} trick...",
+            "The {topic} wave you need to catch...",
+            "This {topic} hack is blowing up...",
+            "Get on this {topic} trend before it's gone...",
+            "The {topic} secret everyone's talking about...",
+            "You're losing money not knowing this {topic} hack...",
+            "Missing out on {topic} benefits? Here's why..."
+        ],
+        "best_for": ["Trends", "Opportunities", "Time-Sensitive"],
+        "emotional_tone": ["Urgent", "Exciting", "Compelling"]
+    },
+    "Problem-Agitate": {
+        "description": "Highlights a problem then offers solution",
+        "templates": [
+            "Tired of struggling with {topic}?",
+            "Frustrated with your {topic} results?",
+            "Can't seem to master {topic}?",
+            "Is {topic} giving you headaches?",
+            "Fed up with {topic} failures?",
+            "Done with {topic} disappointments?",
+            "Still can't figure out {topic}?",
+            "Is {topic} holding you back?",
+            "Struggling to understand {topic}?",
+            "Wasting time on {topic}?",
+            "Not seeing {topic} progress?",
+            "Is {topic} stressing you out?",
+            "Overwhelmed by {topic}?",
+            "Need help with {topic}?",
+            "Ready to fix your {topic} problems?"
+        ],
+        "best_for": ["Solutions", "Problem-Solving", "Help Videos"],
+        "emotional_tone": ["Empathetic", "Understanding", "Helpful"]
+    }
+}
+
+# Part 3A: Enhanced Outro System
+
+OUTROS = {
+    "Template": {
+        "Call to Action": [
+            # Basic CTAs
+            "Follow for more {topic} content!",
+            "Hit + for part 2!",
+            "Drop a 💡 if you learned something new!",
+            "Save this for later!",
+            "Don't forget to follow for daily {topic} tips!",
+            "Share this with someone who needs it!",
+            "Double tap if you found this helpful!",
+            "Turn on notifications to never miss a {topic} tip!",
+            
+            # Social Proof CTAs
+            "Join {number}k others learning about {topic}!",
+            "This helped over {number}k people with {topic}!",
+            "The {topic} community loves this trick!",
+            "Don't just take my word - read the comments!",
+            "We're {number}k strong in the {topic} journey!",
+            
+            # FOMO-Based
+            "Don't miss tomorrow's {topic} secret!",
+            "More {topic} hacks coming this week!",
+            "Limited time {topic} tips in my next video!",
+            "Exclusive {topic} content dropping soon!",
+            "Secret {topic} method revealed tomorrow!",
+            
+            # Value-Based
+            "More life-changing {topic} hacks on my profile!",
+            "Click my bio for free {topic} resources!",
+            "Full {topic} guide in my latest post!",
+            "Get my complete {topic} checklist - link in bio!",
+            "Unlock more {topic} secrets on my page!"
+        ],
+        "Engagement": {
+            "Questions": [
+                "Comment your thoughts below!",
+                "What's your experience with {topic}?",
+                "Drop your {topic} questions below!",
+                "What should I cover next about {topic}?",
+                "Scale of 1-10, how helpful was this {topic} tip?",
+                "Tag someone who needs these {topic} tips!",
+                "What's your biggest {topic} challenge?",
+                "Share your best {topic} hack in the comments!",
+                "Which {topic} tip surprised you most?",
+                "Need help with specific {topic} problems? Ask below!"
+            ],
+            "Challenges": [
+                "Try this {topic} hack and show me your results!",
+                "Duet this video with your {topic} attempt!",
+                "Show me your {topic} transformation!",
+                "Take the {topic} challenge - tag me in your try!",
+                "Use this sound for your {topic} video!",
+                "Stitch with your {topic} story!",
+                "React to this {topic} hack!",
+                "Start your {topic} journey today - show me day 1!",
+                "Join the {topic} revolution - post your version!",
+                "Make this {topic} hack go viral!"
+            ],
+            "Community Building": [
+                "Welcome to the {topic} family!",
+                "Join our {topic} community!",
+                "Let's master {topic} together!",
+                "Support each other's {topic} journey below!",
+                "Share your {topic} wins in the comments!",
+                "Drop a ❤️ if you're part of the {topic} gang!",
+                "Tag your {topic} accountability partner!",
+                "Build your {topic} network - connect below!",
+                "Share this with your {topic} study group!",
+                "Let's grow our {topic} skills together!"
+            ]
+        },
+        "Series Continuation": {
+            "Part Announcements": [
+                "Part {number} drops tomorrow!",
+                "More {topic} secrets in part {number}!",
+                "Like for part {number}!",
+                "Next part at {number}k likes!",
+                "Comment '📝' for part {number}!"
+            ],
+            "Series Hooks": [
+                "This {topic} series will change your life...",
+                "The {topic} journey continues...",
+                "Your {topic} transformation starts here...",
+                "Level up your {topic} game with this series...",
+                "Master {topic} with this tutorial series..."
+            ]
+        }
+    },
+    "LLM": {
+        "instructions": """
+        Generate a creative outro that:
+        1. Matches the video's emotion and style
+        2. Encourages engagement through:
+           - Asking relevant questions
+           - Encouraging saves and shares
+           - Creating community interaction
+           - Promoting discussion
+        3. Hints at future content by:
+           - Teasing upcoming videos
+           - Suggesting related topics
+           - Creating anticipation
+        4. Feels natural and authentic by:
+           - Using conversational language
+           - Avoiding forced engagement
+           - Being genuine and relatable
+        5. Includes appropriate emojis (2-3 max)
+        6. Keeps length between 10-15 words
+        7. Incorporates one clear call to action
+        8. Uses platform-specific language
+        
+        Style Guidelines:
+        - Keep it casual and friendly
+        - Use active voice
+        - Create urgency without desperation
+        - Make it shareable and memorable
+        - Focus on value to viewer
+        """,
+        "engagement_patterns": {
+            "Question Types": [
+                "Opinion Questions",
+                "Experience Questions",
+                "Preference Questions",
+                "Problem Questions",
+                "Future Questions"
+            ],
+            "Emotion Triggers": [
+                "Curiosity",
+                "FOMO",
+                "Excitement",
+                "Connection",
+                "Achievement"
+            ],
+            "Call Types": [
+                "Direct Ask",
+                "Soft Suggestion",
+                "Value Offer",
+                "Community Join",
+                "Challenge Accept"
+            ]
+        }
+    }
+}
+
+# Part 3B: Enhanced Content Categories
+
+CONTENT_CATEGORIES = {
+    "Educational": {
+        "Academic": [
+            "Study Tips",
+            "Exam Preparation",
+            "Memory Techniques",
+            "Note-Taking Methods",
+            "Time Management",
+            "Subject Tutorials",
+            "Learning Hacks",
+            "Research Methods"
+        ],
+        "Professional Skills": [
+            "Career Development",
+            "Interview Tips",
+            "Resume Writing",
+            "Public Speaking",
+            "Leadership Skills",
+            "Networking Tips",
+            "Business Etiquette",
+            "Workplace Communication"
+        ],
+        "Life Skills": [
+            "Financial Literacy",
+            "Time Management",
+            "Organization Tips",
+            "Problem Solving",
+            "Decision Making",
+            "Critical Thinking",
+            "Emotional Intelligence",
+            "Personal Development"
+        ],
+        "Technical": [
+            "Programming Tutorials",
+            "Digital Tools",
+            "Software Tips",
+            "Tech Shortcuts",
+            "App Reviews",
+            "Hardware Guides",
+            "Coding Basics",
+            "Tech Troubleshooting"
+        ]
+    },
+    "Entertainment": {
+        "Performance": [
+            "Dance Choreography",
+            "Singing Covers",
+            "Comedy Skits",
+            "Acting Scenes",
+            "Musical Performances",
+            "Lip Sync",
+            "Talent Showcases",
+            "Character Impressions"
+        ],
+        "Gaming": [
+            "Game Reviews",
+            "Gaming Tips",
+            "Speedruns",
+            "Game Reactions",
+            "Easter Eggs",
+            "Gaming News",
+            "Strategy Guides",
+            "Gaming Highlights"
+        ],
+        "Reactions": [
+            "Trend Reactions",
+            "Video Reactions",
+            "News Reactions",
+            "Product Testing",
+            "Food Tasting",
+            "Experience Reviews",
+            "Live Reactions",
+            "First Impressions"
+        ],
+        "Challenges": [
+            "Dance Challenges",
+            "Skill Challenges",
+            "Food Challenges",
+            "Fitness Challenges",
+            "Creative Challenges",
+            "Duets",
+            "Trending Challenges",
+            "Original Challenges"
+        ]
+    },
+    "Lifestyle": {
+        "Fashion": [
+            "Style Tips",
+            "Outfit Ideas",
+            "Fashion Hauls",
+            "Trend Updates",
+            "Wardrobe Hacks",
+            "Fashion DIY",
+            "Shopping Guide",
+            "Season Looks"
+        ],
+        "Beauty": [
+            "Makeup Tutorials",
+            "Skincare Routines",
+            "Hair Styling",
+            "Beauty Hacks",
+            "Product Reviews",
+            "Natural Beauty",
+            "Beauty Tips",
+            "Transformation"
+        ],
+        "Fitness": [
+            "Workout Routines",
+            "Exercise Tips",
+            "Diet Plans",
+            "Transformation",
+            "Fitness Challenges",
+            "Home Workouts",
+            "Gym Guide",
+            "Sports Training"
+        ],
+        "Food & Cooking": [
+            "Recipe Tutorials",
+            "Cooking Hacks",
+            "Food Reviews",
+            "Kitchen Tips",
+            "Meal Prep",
+            "Healthy Eating",
+            "Baking Guide",
+            "Restaurant Reviews"
+        ]
+    },
+    "Creative": {
+        "Art & Design": [
+            "Art Tutorials",
+            "Digital Design",
+            "Drawing Tips",
+            "Painting Guide",
+            "Graphic Design",
+            "Animation",
+            "Creative Process",
+            "Art Challenges"
+        ],
+        "DIY & Crafts": [
+            "Craft Tutorials",
+            "DIY Projects",
+            "Upcycling",
+            "Home Decor",
+            "Handmade Items",
+            "Gift Ideas",
+            "Easy Crafts",
+            "Seasonal Projects"
+        ],
+        "Photography": [
+            "Photo Tips",
+            "Camera Tricks",
+            "Editing Tutorial",
+            "Composition Guide",
+            "Lighting Setup",
+            "Phone Photography",
+            "Props Ideas",
+            "Photo Challenges"
+        ],
+        "Music": [
+            "Music Production",
+            "Instrument Tips",
+            "Song Covers",
+            "Music Theory",
+            "Beat Making",
+            "Vocal Training",
+            "Music Reviews",
+            "Artist Features"
+        ]
+    },
+    "Business & Money": {
+        "Entrepreneurship": [
+            "Business Tips",
+            "Startup Guide",
+            "Marketing Strategy",
+            "Sales Techniques",
+            "Business Models",
+            "Success Stories",
+            "Growth Hacks",
+            "Business Tools"
+        ],
+        "Finance": [
+            "Money Tips",
+            "Investment Guide",
+            "Saving Strategies",
+            "Budgeting Help",
+            "Credit Advice",
+            "Tax Tips",
+            "Wealth Building",
+            "Financial Literacy"
+        ],
+        "Side Hustles": [
+            "Online Business",
+            "Passive Income",
+            "Freelancing Tips",
+            "E-commerce Guide",
+            "Digital Products",
+            "Service Business",
+            "Income Streams",
+            "Business Ideas"
+        ],
+        "Career Growth": [
+            "Job Search",
+            "Interview Prep",
+            "Resume Tips",
+            "Career Change",
+            "Skill Development",
+            "Salary Negotiation",
+            "Work Life Balance",
+            "Professional Growth"
+        ]
+    }
+}
+
+# Add helper functions for content selection
+def get_random_topic(category: str, subcategory: str = None) -> str:
+    """Get a random topic from specified category/subcategory"""
+    if subcategory:
+        return random.choice(CONTENT_CATEGORIES[category][subcategory])
+    topics = []
+    for subcat in CONTENT_CATEGORIES[category].values():
+        topics.extend(subcat)
+    return random.choice(topics)
+
+def get_trending_combinations() -> List[Dict]:
+    """Generate trending content combinations"""
+    return [
+        {
+            "category": cat,
+            "subcategory": subcat,
+            "topic": topic,
+            "hook_type": random.choice(list(HOOK_TYPES.keys())),
+            "emotion": random.choice([e for ems in EMOTIONS.values() for e in ems])
+        }
+        for cat, subcats in CONTENT_CATEGORIES.items()
+        for subcat, topics in subcats.items()
+        for topic in topics
+    ]
+
+
+"viral_character.py":
+
+# viral_character.py
+
+from dataclasses import dataclass
+from typing import List, Optional
+import random
+import re
+from textblob import TextBlob
+from tiktok_config import (
+    EMOTIONS,
+    HOOK_TYPES,
+    OUTROS,
+    CONTENT_CATEGORIES,
+    STORY_FRAMEWORKS,
+    VIDEO_STRUCTURES
+)
+
+@dataclass
+class ViralVideo:
+    """Represents a single TikTok video configuration"""
+    topic: str
+    hook_type: Optional[str]
+    duration: float
+    emotion: str
+    use_template_outro: bool
+    category: str
+    subcategory: Optional[str]
+    video_structure: str
+    story_framework: str
+    outro_category: Optional[str]
+    outro_template: Optional[str] = None
+    custom_outro: Optional[str] = None
+
+@dataclass
+class ViralCharacterConfig:
+    """Configuration for the Viral character's session"""
+    num_videos: int
+    video_duration: float
+    selected_emotion: Optional[str]
+    selected_hook_type: Optional[str]
+    selected_topic: Optional[str]
+    use_template_outros: bool
+    use_template_hooks: bool
+    llm_generated_topics: bool
+    video_structure: str
+    story_framework: str
+    category: str
+    subcategory: Optional[str] = None
+    selected_category: Optional[str] = None
+    outro_category: Optional[str] = None
+    outro_subcategory: Optional[str] = None  # Added field
+
+def generate_viral_prompt(
+    conversation_history: str,
+    video_config: ViralVideo,
+    character_config: ViralCharacterConfig
+) -> str:
+    """
+    Generates a prompt for the Viral character based on TikTok-specific configuration
+    """
+    base_profile = """
+You are Viral, a charismatic and trend-savvy TikTok content creator. Your content is 
+engaging, authentic, and crafted to resonate with your audience while maintaining your 
+unique style and personality.
+"""
+
+    # Generate hook example
+    hook_instruction = ''
+    if character_config.use_template_hooks and video_config.hook_type:
+        hook_templates = HOOK_TYPES[video_config.hook_type]['templates']
+        placeholder_values = {
+            'topic': video_config.topic or "{topic}",
+            'number': '50',
+            'total': '100',
+            'amount': '$100',
+            'percentage': '50%'
+        }
+        # Validate and format hook templates
+        valid_templates = []
+        for template in hook_templates:
+            try:
+                # Try to format the template with the placeholders
+                hook_example = template.format(**placeholder_values)
+                valid_templates.append(hook_example)
+            except KeyError:
+                # Skip templates that require placeholders we don't have
+                continue
+        if valid_templates:
+            hook_example = random.choice(valid_templates)
+            hook_instruction = f'- Start with a captivating hook similar to: "{hook_example}"\n'
+        else:
+            # If no valid templates, provide general instruction
+            hook_instruction = f'- Start with a captivating hook related to the topic.\n'
+    else:
+        # General instruction for when not using template hooks
+        hook_instruction = f'- Start with a captivating hook related to the topic.\n'
+
+    # Get outro instructions
+    if video_config.use_template_outro and video_config.outro_template:
+        outro_style_line = f'- End with this outro style: "{video_config.outro_template}"\n'
+    else:
+        outro_style_line = f'- End with an engaging outro that encourages interaction.\n'
+
+    # Validate and set the emotion
+    if character_config.selected_emotion not in [emotion for emotions in EMOTIONS.values() for emotion in emotions]:
+        best_emotions = STORY_FRAMEWORKS[video_config.story_framework].get('best_emotions', [])
+        if best_emotions:
+            video_config.emotion = random.choice(best_emotions)
+        else:
+            video_config.emotion = random.choice([emotion for emotions in EMOTIONS.values() for emotion in emotions])
+
+    # Build the prompt
+    prompt = (
+        f"{base_profile}\n\n"
+        f"Create a TikTok script that is approximately {video_config.duration} seconds long.\n\n"
+        f"Topic: {video_config.topic}\n"
+        f"Category: {video_config.category}\n"
+        f"Emotion/Tone: {video_config.emotion}\n\n"
+        f"Instructions:\n"
+        f"{hook_instruction}"
+        f"- Ensure that the content is focused on the topic: {video_config.topic}.\n"
+        f"- The content should logically follow from the hook and expand on it.\n"
+        f"- Deliver content that flows naturally without using any section headers, labels, or script cues like 'Voiceover'.\n"
+        f"- Do not include any words like 'Voiceover', 'Scene', 'Act', or any stage directions.\n"
+        f"- Maintain a {video_config.emotion.lower()} tone throughout the script.\n"
+        f"- Ensure the content is engaging, informative, and suitable for TikTok's format.\n"
+        f"- Include a clear conclusion or takeaway at the end.\n"
+        f"{outro_style_line}"
+        f"- Write in first person, as if you are speaking directly to the audience.\n"
+        f"- Keep sentences short and punchy to match TikTok's fast-paced style.\n"
+        f"- The script should be self-contained and make sense without any additional context.\n"
+        f"- Avoid repeating the same content in multiple scripts. Each script should introduce new ideas or tips related to the topic.\n\n"
+        f"Previous Content History (for context):\n"
+        f"{conversation_history}\n\n"
+        f"Now, generate the TikTok script."
+    )
+    return prompt.strip()
+
+def clean_tiktok_text(text: str) -> str:
+    """
+    Clean and format TikTok script text.
+    Removes unwanted formatting while preserving the natural TikTok speaking style.
+    """
+    # Remove any markdown formatting
+    text = re.sub(r'[*_~`]', '', text)
+
+    # Remove action descriptions
+    text = re.sub(r'\([^)]*\)', '', text)
+    text = re.sub(r'\[[^\]]*\]', '', text)
+
+    # Remove multiple spaces and clean up newlines
+    text = ' '.join(text.split())
+
+    # Remove any remaining special characters while preserving emojis and apostrophes
+    allowed_chars = r'[^a-zA-Z0-9\s.,!?\'💡❤️🔥✨👋🎯💪🌟]'
+    text = re.sub(allowed_chars, '', text)
+
+    return text.strip()
+
+def detect_viral_emotion(text: str) -> str:
+    """
+    Detect the emotional tone of TikTok content.
+    Enhanced to understand TikTok-specific language and style.
+    """
+    blob = TextBlob(text)
+    sentiment = blob.sentiment.polarity
+    subjectivity = blob.sentiment.subjectivity
+
+    # More nuanced emotion mapping based on both polarity and subjectivity
+    if sentiment > 0.6:
+        return 'Excited' if subjectivity > 0.5 else 'Professional'
+    elif sentiment > 0.2:
+        return 'Enthusiastic' if subjectivity > 0.5 else 'Informative'
+    elif sentiment < -0.6:
+        return 'Dramatic' if subjectivity > 0.5 else 'Critical'
+    elif sentiment < -0.2:
+        return 'Intriguing' if subjectivity > 0.5 else 'Analytical'
+    else:
+        return 'Casual' if subjectivity > 0.5 else 'Neutral'
+
+def estimate_tiktok_duration(
+    text: str,
+    speaking_rate: float = 150
+) -> float:
+    """
+    Estimate the duration of TikTok content when spoken.
+    speaking_rate: words per minute
+    Returns: duration in seconds
+    """
+    words = len(text.split())
+    duration = (words / speaking_rate) * 60
+    return duration
+
+def create_viral_video(
+    llm_api,
+    video_config: ViralVideo,
+    character_config: ViralCharacterConfig,
+    conversation_history: List[str]
+) -> tuple[str, float]:
+    """
+    Creates a single TikTok video script and returns it with its estimated duration.
+    """
+    # Generate the prompt
+    prompt = generate_viral_prompt(
+        '\n'.join(conversation_history),
+        video_config,
+        character_config
+    )
+
+    # Get content from LLM
+    content = llm_api(prompt)
+
+    if not content:
+        content = "Failed to generate content. Please try again."
+
+    # Clean the content
+    clean_content = clean_tiktok_text(content)
+
+    # Estimate duration
+    duration = estimate_tiktok_duration(
+        clean_content
+    )
+
+    return clean_content, duration
+
+class ViralCharacter:
+    def __init__(self, llm_api):
+        self.llm_api = llm_api
+        self.conversation_history = []
+        self.videos_created = 0
+        self.total_duration = 0
+
+    def create_video(
+        self,
+        config: ViralCharacterConfig,
+        video_config: ViralVideo
+    ) -> tuple[str, float]:
+        """
+        Creates a single TikTok video based on the provided configurations.
+        Returns the script and its duration.
+        """
+        content, duration = create_viral_video(
+            self.llm_api,
+            video_config,
+            config,
+            self.conversation_history
+        )
+
+        # Update history and counters
+        self.conversation_history.append(f"Video {self.videos_created + 1}:\n{content}")
+        self.videos_created += 1
+        self.total_duration += duration
+
+        return content, duration
+
+
+
+"viral_generator.py":
+
+# viral_generator.py
+
+import time
+import random
+import numpy as np
+from TTS.api import TTS
+from threading import Thread
+import psutil
+from viral_character import ViralCharacter, ViralVideo, ViralCharacterConfig
+from tiktok_config import OUTROS, VIDEO_STRUCTURES, STORY_FRAMEWORKS
+import logging
+import traceback
+import queue
+from queue import Queue as ThreadQueue
+import os
+import soundfile as sf  # Added import
+
+# Get the module-specific logger
+logger = logging.getLogger(__name__)
+
+def viral_generator_process(
+    audio_queue,
+    stop_event,
+    desired_duration_seconds,
+    output_filename,
+    selected_speaker,
+    viral_config: ViralCharacterConfig,
+    max_cpu_usage,
+    progress_queue,
+    pause_event
+):
+    """
+    Process that generates TikTok-style videos with specified configuration.
+    """
+
+    # Initialize variables
+    conversation_history = []
+    conversation_transcript = ""
+    total_duration_seconds = 0
+    videos_created = 0
+
+    # Initialize TTS model
+    print(f"\nInitializing TTS model for TikTok video generation...")
+    logger.info("Initializing TTS model for TikTok video generation...")
+    tts_model = TTS("tts_models/en/vctk/vits", progress_bar=False, gpu=False)
+    print("TTS model loaded successfully.")
+    logger.info("TTS model loaded successfully.")
+
+    # Create a thread-safe queue for video content
+    content_queue = ThreadQueue(maxsize=5)  # Buffer for 5 videos
+
+    def generate_video_content():
+        """Thread function to generate video content"""
+        nonlocal videos_created
+
+        # Initialize the ViralCharacter with the llm_api function
+        character = ViralCharacter(llm_api)
+
+        while videos_created < viral_config.num_videos and not stop_event.is_set():
+            # Pause if pause_event is set
+            if pause_event.is_set():
+                time.sleep(1)
+                continue
+
+            try:
+                # Check CPU usage
+                while psutil.cpu_percent(interval=0.1) > max_cpu_usage * 100:
+                    time.sleep(0.1)
+
+                # Get structure-specific timing
+                structure_timing = VIDEO_STRUCTURES[viral_config.video_structure]['typical_duration']
+                target_duration = (structure_timing[0] + structure_timing[1]) / 2
+
+                # Handle outro template selection
+                outro_template = None
+                if viral_config.use_template_outros and viral_config.outro_category:
+                    outro_section = OUTROS['Template'][viral_config.outro_category]
+                    if viral_config.outro_subcategory:
+                        # If subcategory exists, select from it
+                        templates = outro_section[viral_config.outro_subcategory]
+                        outro_template = random.choice(templates)
+                    elif isinstance(outro_section, list):
+                        # Directly select if it's a list
+                        templates = outro_section
+                        outro_template = random.choice(templates)
+                    else:
+                        # Randomly select from all subcategories
+                        all_templates = []
+                        for subtemplates in outro_section.values():
+                            all_templates.extend(subtemplates)
+                        outro_template = random.choice(all_templates)
+
+                # Create video configuration with new fields
+                current_video = ViralVideo(
+                    topic=viral_config.selected_topic,
+                    hook_type=viral_config.selected_hook_type,
+                    duration=target_duration,  # Use structure-specific duration
+                    emotion=viral_config.selected_emotion,
+                    use_template_outro=viral_config.use_template_outros,
+                    category=viral_config.category,
+                    subcategory=viral_config.subcategory,
+                    video_structure=viral_config.video_structure,
+                    story_framework=viral_config.story_framework,
+                    outro_category=viral_config.outro_category,
+                    outro_template=outro_template
+                )
+
+                # Generate content using viral character
+                content, duration = character.create_video(viral_config, current_video)
+
+                # Put content in queue
+                content_queue.put((content, duration))
+                videos_created += 1
+
+            except Exception as e:
+                logger.error(f"Error generating video content: {e}", exc_info=True)
+                print(f"Error generating video content: {e}")
+                time.sleep(1)  # Brief pause before retry
+
+    # Define the llm_api function using the same format as in shared_functions.py
+    def llm_api(prompt):
+        import subprocess
+
+        # Construct the command as per your working example
+        command = ["ollama", "run", "hf.co/ArliAI/Mistral-Small-22B-ArliAI-RPMax-v1.1-GGUF:latest"]
+
+        try:
+            result = subprocess.run(
+                command,
+                input=prompt,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8',
+                check=True
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            error_message = e.stderr.strip()
+            logger.error(f"Error calling LLM API: {error_message}", exc_info=True)
+            print(f"Error calling LLM API: {error_message}")
+            return ""
+
+    # Attach llm_api to character_config for topic generation
+    ViralCharacterConfig.llm_api = staticmethod(llm_api)
+
+    # Start content generation thread
+    generator_thread = Thread(target=generate_video_content)
+    generator_thread.daemon = True
+    generator_thread.start()
+
+    audio_save_path = os.path.join(os.getcwd(), f"{output_filename}_audio")
+    os.makedirs(audio_save_path, exist_ok=True)
+
+    while not stop_event.is_set():
+        # Pause if pause_event is set
+        if pause_event.is_set():
+            time.sleep(1)
+            continue
+
+        try:
+            # Check if we've created all requested videos
+            if videos_created >= viral_config.num_videos and content_queue.empty():
+                break
+
+            # Get content from queue
+            try:
+                content, estimated_duration = content_queue.get(timeout=1)
+            except queue.Empty:
+                continue  # No content available yet, loop again
+
+            # Update transcript with more detailed formatting
+            conversation_transcript += f"\n=== Video {len(conversation_history) + 1} ===\n"
+            conversation_transcript += f"Structure: {viral_config.video_structure}\n"
+            conversation_transcript += f"Framework: {viral_config.story_framework}\n"
+            conversation_transcript += f"Duration: {estimated_duration:.1f}s\n"
+            conversation_transcript += f"Content:\n{content}\n"
+            conversation_history.append(content)
+
+            # Generate speech with structure-appropriate pacing
+            structure_speed = 0.85  # Base speed
+            if 'Tutorial' in viral_config.video_structure:
+                structure_speed = 0.9  # Slightly faster for tutorials
+            elif 'Story' in viral_config.video_structure:
+                structure_speed = 0.8  # Slower for stories
+
+            # Generate the audio
+            wav = tts_model.tts(
+                text=content,
+                speaker=selected_speaker,
+                speed=structure_speed
+            )
+
+            # Process audio
+            wav = np.array(wav, dtype=np.float32)
+            wav = wav / np.max(np.abs(wav))
+
+            # Calculate actual duration
+            actual_duration = len(wav) / tts_model.synthesizer.output_sample_rate
+            total_duration_seconds += actual_duration
+
+            # Put audio in queue
+            audio_queue.put(wav)
+
+            # Save audio to file
+            audio_filename = os.path.join(audio_save_path, f"video_{len(conversation_history)}.wav")
+            # Save audio using soundfile
+            sf.write(audio_filename, wav, samplerate=tts_model.synthesizer.output_sample_rate)
+            print(f"Audio for Video {len(conversation_history)} saved to {audio_filename}")
+            logger.info(f"Audio for Video {len(conversation_history)} saved to {audio_filename}")
+
+            # Update progress with enhanced information
+            progress_info = {
+                'total_duration_seconds': total_duration_seconds,
+                'videos_completed': len(conversation_history),
+                'total_videos': viral_config.num_videos,
+                'current_structure': viral_config.video_structure,
+                'current_framework': viral_config.story_framework,
+                'estimated_remaining': (viral_config.num_videos - len(conversation_history)) * estimated_duration
+            }
+            progress_queue.put(progress_info)
+
+            # Check if we've hit the desired duration (if specified)
+            if desired_duration_seconds > 0 and total_duration_seconds >= desired_duration_seconds:
+                stop_event.set()
+                break
+
+            # Dynamic pause between videos based on structure
+            pause_time = 0.5
+            if 'Story' in viral_config.video_structure:
+                pause_time = 0.8  # Longer pause after stories
+            elif 'Quick' in viral_config.video_structure:
+                pause_time = 0.3  # Shorter pause for quick content
+            time.sleep(pause_time)
+
+        except Exception as e:
+            if stop_event.is_set():
+                break
+            logger.error(f"Error in video generation loop: {e}", exc_info=True)
+            print(f"Error in video generation loop: {e}")
+            time.sleep(1)
+
+    # Save enhanced transcript
+    try:
+        with open(f"{output_filename}.txt", "w", encoding="utf-8") as f:
+            f.write(f"=== TikTok Content Generation Report ===\n")
+            f.write(f"Structure: {viral_config.video_structure}\n")
+            f.write(f"Framework: {viral_config.story_framework}\n")
+            f.write(f"Total Videos: {len(conversation_history)}\n")
+            f.write(f"Total Duration: {total_duration_seconds:.2f} seconds\n\n")
+            f.write(conversation_transcript)
+    except Exception as e:
+        logger.error(f"Error saving transcript: {e}", exc_info=True)
+        print(f"Error saving transcript: {e}")
+
+    # Cleanup
+    stop_event.set()
+    generator_thread.join(timeout=1)
+
+    print(f"\nTikTok video generation completed:")
+    print(f"- Total videos created: {len(conversation_history)}")
+    print(f"- Total duration: {total_duration_seconds:.2f} seconds")
+    if len(conversation_history) > 0:
+        print(f"- Average duration per video: {total_duration_seconds/len(conversation_history):.2f} seconds")
+    else:
+        print("- No videos were created.")
+    print(f"- Transcript saved to: {output_filename}.txt")
+    print(f"- Audio files saved in: {audio_save_path}")
+    logger.info("TikTok video generation completed.")
+
+
+
