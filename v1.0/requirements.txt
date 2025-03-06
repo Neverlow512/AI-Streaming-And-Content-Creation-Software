@@ -1,0 +1,5 @@
+TTS
+sounddevice
+numpy
+textblob
+nltk
