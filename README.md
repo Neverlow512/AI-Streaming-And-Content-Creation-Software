@@ -130,7 +130,7 @@ The project is in active development with a working prototype that demonstrates:
 
 ## License
 This project is licensed under the [MIT License](LICENSE).  
-Copyright <2024-2025> <Neverlow512>
+Copyright 2024-2025 Neverlow512
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -141,4 +141,5 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 ## Contact
 For inquiries, collaborations, or further information, please contact:  
 **Email:** neverlow512@proton.me
+
 **GitHub:** [github.com/Neverlow512](https://github.com/Neverlow512)
