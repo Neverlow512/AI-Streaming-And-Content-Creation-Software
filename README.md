@@ -1,4 +1,4 @@
-# AI Character Streaming Platform
+# AI Streaming And Content Creation Software
 
 ## Project Overview
 This project is a comprehensive AI streaming platform designed to enable interactive, AI-driven character performances on live streaming platforms (e.g., Twitch). The current implementation features an AI persona—“Emily,” a character with a distinct and provocative personality—but the framework is fully extensible to support multiple characters with unique traits. Built as an experimental, high-innovation hobby project, this tool demonstrates advanced integration of AI-assisted code generation, text-to-speech synthesis, and real-time audio routing, all developed using ethical and legally compliant methods.
